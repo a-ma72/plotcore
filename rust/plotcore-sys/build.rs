@@ -25,8 +25,16 @@ const SOURCES: &[&str] = &[
 
 fn main() {
     let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("cargo sets it"));
-    // rust/plotcore-sys -> the repository's root
-    let root = manifest.join("../..");
+    // The sources are this crate's cpp/ and c/: links to the repository's own,
+    // which cargo follows when it packages the crate, so the published crate
+    // carries copies and needs no repository around it. A checkout made without
+    // symbolic links -- Git for Windows' default -- has each link as a text
+    // file naming its target, and is reached from rust/plotcore-sys instead.
+    let root = if manifest.join("c/plotcore.h").is_file() {
+        manifest.clone()
+    } else {
+        manifest.join("../..")
+    };
     let version = std::env::var("CARGO_PKG_VERSION").expect("cargo sets it");
 
     let mut build = cc::Build::new();

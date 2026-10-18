@@ -47,6 +47,34 @@ each built and tested on Linux and Windows; then every demo packaged for both,
 one artefact per demo per platform. It builds, tests and uploads artefacts;
 it publishes nothing.
 
+## Releasing
+
+A tag `v<version>` is a release, and `.github/workflows/release.yml` is all of
+it: it runs `ci.yml` at the tagged commit, then publishes what that built —
+the demos (the Windows folders zipped) and both wheels on a GitHub release
+with a `SHA256SUMS`, then the wheels on PyPI and the three library crates on
+crates.io. The registries go last because they cannot be taken back.
+
+- **The version** is in `CMakeLists.txt` (`project(plotcore VERSION …)`),
+  `python/pyproject.toml`, and `rust/Cargo.toml` twice — `[workspace.package]`
+  and the version beside each path in `[workspace.dependencies]`. The first
+  job fails the release when the tag is not the first three; cargo fails the
+  build when the fourth is not the first.
+- **The notes** are the tag's annotation: `git tag -a v<version>`, a subject
+  line, then the notes in Markdown. A lightweight tag has none.
+- **PyPI** is trusted publishing from `release.yml` in the `pypi` environment,
+  and only wheels go up: the wheel's CMake project is the whole repository, so
+  an sdist of `python/` could not build it.
+- **crates.io** is `cargo publish --workspace --exclude egui-demo` with the
+  `CARGO_REGISTRY_TOKEN` secret of the `crates-io` environment.
+  `plotcore-sys` carries the C++ through `cpp/` and `c/` beside its manifest,
+  which are symbolic links into the repository that cargo follows when it
+  packages the crate; its `include` keeps it to the core and the C interface.
+  `build.rs` reads through them, and from the repository directly where a
+  checkout has the links as text files (Git for Windows' default). CI's rust
+  job runs `cargo package` on every commit, so a crate that would not publish
+  fails there first.
+
 ## Layout
 
 One directory per language, each with its library, its tests and its demo.
@@ -60,7 +88,7 @@ each define their own targets.
 | `cpp/qt/`, `cpp/qt-demo/` | `plotcore::qt`, a `QWidget` over a `Figure`, and the Qt demo. |
 | `c/` | `plotcore.h`, `Figure` as C, built as `plotcore_c`, and `tests/test_capi.c`. |
 | `python/` | The package (`src/plotcore`: `_native.py`, `figure.py`, `scene.py`, `qt.py`, `mpl.py`), its tests, and `pyqt6-demo/` with the demo's pinned `requirements.txt`. |
-| `rust/` | `plotcore-sys`, `plotcore`, `plotcore-egui`, `egui-demo`. |
+| `rust/` | `plotcore-sys`, `plotcore`, `plotcore-egui`, `egui-demo`; `README.md` is the crates' page on crates.io. |
 | `golden/` | The script the C, Python and Rust tests all run, and its digest. |
 | `packaging/` | The icon; `appimage/`, the demos for Linux; `windows/`, the demos for Windows. |
 
@@ -154,9 +182,9 @@ safe wrapper, whose readers and text measure are boxed and handed to the C side
 as contexts it gives back; `plotcore-egui` paints a scene as plotcore's
 triangles or as feathered polylines and hands egui's raw input events over as
 gestures; `egui-demo` walks every feature, and its `--self-test` drives egui
-headless, so `cargo test` needs no display. Because `plotcore-sys` reaches
-`../../cpp/src`, a crate is built from this repository and is not publishable
-as it stands.
+headless, so `cargo test` needs no display. `plotcore-sys` reaches `cpp/src/`
+and `c/` through links beside its manifest, which is how the crate on
+crates.io carries them (see "Releasing").
 
 ## The floor
 

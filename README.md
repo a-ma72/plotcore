@@ -75,8 +75,24 @@ and says whether each did what it should. CI runs all three that way.
 
 ## Downloads
 
-CI builds everything on every commit, on Linux and Windows, and uploads it to
-the run as artefacts:
+Each release is on the
+[releases page](https://github.com/jonassattler/plotcore/releases), and the
+libraries are on their languages' registries:
+
+```sh
+pip install plotcore                  # Linux x86-64 (glibc 2.28 and newer), Windows x64
+cargo add plotcore plotcore-egui      # builds the C++ itself: needs a C++20 compiler
+```
+
+For C++, build the release's source with CMake, as above.
+
+A release carries every demo for Linux and Windows. None needs anything
+installed. On Linux it is an AppImage: the download loses its executable bit,
+so `chmod +x` it first. The AppImages are built on AlmaLinux 8, so like
+H5Scope they start on RHEL 8 (glibc 2.28) and anything newer. On Windows it
+is a zipped folder with `plotcore-<toolkit>-demo.exe` in it.
+
+CI builds the same on every commit and uploads it to the run as artefacts:
 
 | | Linux | Windows |
 |---|---|---|
@@ -86,12 +102,10 @@ the run as artefacts:
 | The egui demo | `plotcore-egui-demo-Linux` | `plotcore-egui-demo-Windows` |
 | The PyQt6 demo | `plotcore-pyqt6-demo-Linux` | `plotcore-pyqt6-demo-Windows` |
 
-A demo needs nothing installed. On Linux it is an AppImage: the download
-loses its executable bit, so `chmod +x` it first. The AppImages are built on
-AlmaLinux 8, so like H5Scope they start on RHEL 8 (glibc 2.28) and anything
-newer. On Windows it is a folder with `plotcore-<toolkit>-demo.exe` in it.
-
-Nothing is published to PyPI or crates.io yet.
+A tag `v<version>` is a release: `.github/workflows/release.yml` runs CI at
+that commit, then publishes what it built to the releases page, PyPI and
+crates.io. The version is written in `CMakeLists.txt`,
+`python/pyproject.toml` and `rust/Cargo.toml`, and the tag has to name it.
 
 ## Licence
 
