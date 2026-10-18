@@ -180,6 +180,10 @@ jobs:
           New-Item -ItemType Directory -Force $out | Out-Null
           Copy-Item build/qt/examples/qt/Release/plotcore-qt-demo.exe $out
           windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw "$out/plotcore-qt-demo.exe"
+          # windeployqt deploys the windows platform plugin and no other, and
+          # --self-test runs offscreen. Without it Qt says so in a message box,
+          # which nobody on a runner dismisses.
+          Copy-Item "$env:QT_ROOT_DIR/plugins/platforms/qoffscreen.dll" "$out/platforms/"
           # The C++ runtime Qt and the example were built against: a machine
           # without the Visual C++ redistributable has none of it.
           $vswhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
@@ -188,8 +192,11 @@ jobs:
           Copy-Item LICENSE $out
           Get-ChildItem $out -Name
 
+      # A missing DLL is a message box on Windows rather than an exit code, so
+      # a broken deployment hangs here instead of failing.
       - name: The deployed example starts on its own
         if: runner.os == 'Windows'
+        timeout-minutes: 5
         shell: pwsh
         env:
           QT_QPA_PLATFORM: offscreen
