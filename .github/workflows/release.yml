@@ -5,17 +5,18 @@ name: Release
 
 # A tag v<version> is a release of the commit it names. Everything CI does is
 # done again there (ci.yml, called from here), and what that built is
-# published: the demos and the wheels on a GitHub release, then the wheels on
-# PyPI and the crates on crates.io. The release's notes are the tag's
-# annotation, in Markdown below its subject line:
+# published as a GitHub release: the demos for both platforms and the two
+# wheels, with a checksum of each. Its notes are the tag's annotation, in
+# Markdown below its subject line, written to a file first so that git's own
+# cleanup does not take the "## " headings for comments:
 #
-#   git tag -a v0.1.0
+#   git tag -a --cleanup=whitespace -F notes.md v0.1.0
 #   git push origin v0.1.0
 #
-# The registries come last, because they are what cannot be taken back: a
-# version uploaded to PyPI or crates.io is that version for good, and a
-# release that fails before them has published nothing that cannot be
-# deleted.
+# Nothing goes to PyPI or crates.io. The wheels and crates are ready for
+# them -- CI builds the one and packages the other on every commit -- but a
+# version uploaded there is that version for good, and that is a decision of
+# its own.
 on:
   push:
     tags: ["v*"]
@@ -95,51 +96,3 @@ jobs:
           git tag -l --format='%(contents:body)' "$GITHUB_REF_NAME" > notes.md
           gh release create "$GITHUB_REF_NAME" release/* --verify-tag \
             --title "plotcore ${GITHUB_REF_NAME#v}" --notes-file notes.md
-
-  # The wheels CI built and tested, by trusted publishing: PyPI takes this
-  # job's OIDC token in place of a password, from this repository, this
-  # workflow and the pypi environment only. There is no sdist, for the reason
-  # python/README.md gives.
-  pypi:
-    name: PyPI
-    needs: github
-    runs-on: ubuntu-latest
-    environment:
-      name: pypi
-      url: https://pypi.org/project/plotcore/
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/download-artifact@v7
-        with:
-          pattern: plotcore-python-*
-          path: dist
-          merge-multiple: true
-
-      - uses: pypa/gh-action-pypi-publish@release/v1
-
-  # plotcore-sys, plotcore and plotcore-egui, in that order, each built from
-  # its package before it is uploaded, as CI's rust job does on every commit.
-  # By a token in the crates-io environment, because crates.io takes trusted
-  # publishing only for a crate it already has.
-  crates:
-    name: crates.io
-    needs: github
-    runs-on: ubuntu-latest
-    environment:
-      name: crates-io
-      url: https://crates.io/crates/plotcore
-    defaults:
-      run:
-        working-directory: rust
-    steps:
-      - uses: actions/checkout@v7
-
-      # With no name, rustup installs the one rust-toolchain.toml pins.
-      - name: Toolchain
-        run: rustup toolchain install
-
-      - name: Publish them
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish --workspace --exclude egui-demo --locked

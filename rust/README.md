@@ -34,10 +34,16 @@ let scene = figure.scene().unwrap(); // strokes, rules and text, in pixels
 | `plotcore-egui` | A figure in egui 0.37: its scene painted, egui's input handed over as gestures. |
 | `plotcore-sys` | The C interface the other two are built on. |
 
+The crates are not on crates.io. Use them from the
+[repository](https://github.com/jonassattler/plotcore), at a release's tag:
+
+```sh
+cargo add plotcore plotcore-egui --git https://github.com/jonassattler/plotcore --tag v0.1.0
+```
+
 `plotcore-sys` compiles plotcore's C++ itself, with the `cc` crate, so building
 it needs a C++20 compiler and nothing else: no CMake, no libclang. The egui
-demo in the [repository](https://github.com/jonassattler/plotcore) uses every
-feature on one window:
+demo in the repository uses every feature on one window:
 
 ```sh
 cd rust

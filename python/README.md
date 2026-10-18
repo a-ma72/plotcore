@@ -38,12 +38,12 @@ one window.
 
 ## Installing it
 
-    pip install plotcore
-
-There are wheels for Linux on x86-64 with glibc 2.28 or newer (RHEL 8 and
-anything since) and for Windows on x64. The package loads plotcore's C
-interface (`c/plotcore.h`) with ctypes and links no Python, so one wheel per
-platform serves every Python 3.
+Each [release](https://github.com/jonassattler/plotcore/releases) carries a
+wheel for Linux on x86-64 with glibc 2.28 or newer (RHEL 8 and anything
+since) and one for Windows on x64; `pip install` the one for your platform.
+Nothing is on PyPI. The package loads plotcore's C interface
+(`c/plotcore.h`) with ctypes and links no Python, so one wheel per platform
+serves every Python 3.
 
 There is no source distribution, because the wheel's CMake project is the
 whole repository and not this directory. Anywhere else, build it from a
