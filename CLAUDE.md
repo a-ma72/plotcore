@@ -88,7 +88,7 @@ each define their own targets.
 | Path | What it is |
 |---|---|
 | `cpp/include/plotcore/`, `cpp/src/` | `plotcore::core`. The arithmetic: `Projection` (where a sample lands, gaps, the thinning, strokes as triangles), `Levels` (the fold and the policy over held runs), `Pyramid` (what every run is folded out of), `Budget` (what may be held), `Parallel` (the pool a large fold is spread over). The frame: `Format`, `Ticks`, `Camera`, `Palettes`. Then `LineSource` (what a figure asks of its lines), `Plot` (lines held, and one such source) and `Figure` (the whole plot a host drives). `cpp/src/Json.*` is private. |
-| `cpp/tests/` | The Catch2 suites: `test_plotprojection`, `test_plotlevels`, `test_plotfigure`. |
+| `cpp/tests/` | The Catch2 suites: `test_plotprojection`, `test_plotlevels`, `test_plotfigure`, and `test_plotviewer`, which asks again every question H5Scope's parity suite asked and holds the answers to the ones recorded in `viewer/answers.jsonl`. |
 | `cpp/qt/`, `cpp/qt-demo/` | `plotcore::qt`, a `QWidget` over a `Figure`, and the Qt demo. |
 | `c/` | `plotcore.h`, `Figure` as C, built as `plotcore_c`, and `tests/test_capi.c`. |
 | `python/` | The package (`src/plotcore`: `_native.py`, `figure.py`, `scene.py`, `qt.py`, `mpl.py`), its tests, and `pyqt6-demo/` with the demo's pinned `requirements.txt`. |
@@ -116,7 +116,9 @@ consequences:
   colours to a sixteen-bit step, JavaScript's own number formatting included.
   **A change to how an axis is numbered, ruled, zoomed or coloured is a change
   to both, or the parity suite fails when the pin moves.** The arguments for
-  each rule are written over the QML, not repeated here.
+  each rule are written over the QML, not repeated here. Every question that
+  suite asks is also recorded here with its answer (`cpp/tests/viewer/`), so
+  the rules stay held once the QML is gone.
 - **The rules of the plot itself are written in H5Scope's CLAUDE.md** — the
   separate axes, the logarithmic axis and its edges, why a log x is folded per
   column, why an extreme is drawn at its element, what a zoom may read — and

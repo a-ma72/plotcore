@@ -43,3 +43,13 @@ catch_discover_tests(test_plotlevels)
 add_executable(test_plotfigure test_plotfigure.cpp)
 target_link_libraries(test_plotfigure PRIVATE plotcore::core Catch2::Catch2WithMain)
 catch_discover_tests(test_plotfigure)
+
+# The viewer's answers, asked again: every question its parity suite asked of
+# the QML and of these ports while there were two of them (viewer/README.md).
+# Json.hpp is private to the library, and this is the one test that reads it.
+add_executable(test_plotviewer test_plotviewer.cpp)
+target_link_libraries(test_plotviewer PRIVATE plotcore::core Catch2::Catch2WithMain)
+target_include_directories(test_plotviewer PRIVATE ${PROJECT_SOURCE_DIR}/cpp/src)
+target_compile_definitions(test_plotviewer PRIVATE
+  PLOTCORE_VIEWER_ANSWERS="${CMAKE_CURRENT_SOURCE_DIR}/viewer/answers.jsonl")
+catch_discover_tests(test_plotviewer)
