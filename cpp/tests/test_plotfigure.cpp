@@ -822,3 +822,283 @@ TEST_CASE("a drawn line carries its points in the data's own units too", "[figur
         }
     }
 }
+
+// --- a host's own lines ---------------------------------------------------------
+
+namespace {
+
+/// A host's lines, as the viewer's models are to a figure: answered through
+/// LineSource out of a Plot the host holds, every question counted. `copies`
+/// hands the host's first line over that many times, which is how ten
+/// thousand lines are drawn here without holding ten thousand.
+class CountingSource : public LineSource
+{
+public:
+    explicit CountingSource(Plot& plot, int copies = 0) : plot_(plot), copies_(copies) {}
+
+    int lineCount() const override { return copies_ > 0 ? copies_ : plot_.lineCount(); }
+    int series(int line) const override { return line + seriesOffset; }
+    std::string name(int line) const override { return plot_.name(of(line)); }
+    long long length(int line) const override { return plot_.length(of(line)); }
+    bool ready(int line) const override { return plot_.ready(of(line)); }
+    LineExtent extent(int line) const override
+    {
+        ++extents;
+        return plot_.extent(of(line));
+    }
+    Span xExtent(int line) const override
+    {
+        ++xExtents;
+        return plot_.xExtent(of(line));
+    }
+    double xPositiveMinimum(int line) const override { return plot_.xPositiveMinimum(of(line)); }
+    void setPaneColumns(int columns) override
+    {
+        ++news;
+        plot_.setPaneColumns(columns);
+    }
+    void setView(double xLow, double xHigh, bool xLog) override
+    {
+        ++news;
+        plot_.setView(xLow, xHigh, xLog);
+    }
+    void focus(const GestureFocus& focus) override { focused.push_back(focus); }
+    void clearFocus() override { ++cleared; }
+    PlotLine drawLine(int line) const override { return plot_.drawLine(of(line)); }
+    PlotAxis drawAxis(int line) const override { return plot_.drawAxis(of(line)); }
+
+    int seriesOffset = 0;
+    mutable int extents = 0;
+    mutable int xExtents = 0;
+    int news = 0;
+    std::vector<GestureFocus> focused;
+    int cleared = 0;
+
+private:
+    [[nodiscard]] int of(int line) const { return copies_ > 0 ? 0 : line; }
+
+    Plot& plot_;
+    int copies_;
+};
+
+Figure figureOver(LineSource& source, double width = 800.0, double height = 500.0)
+{
+    Figure figure;
+    figure.setSource(&source);
+    figure.setSize(width, height);
+    FigureSettings settings = figure.settings();
+    settings.legend = false;
+    figure.setSettings(settings);
+    return figure;
+}
+
+std::size_t pointsOf(const DrawnLine& line)
+{
+    std::size_t points = 0;
+    for (const std::vector<Point>& run : line.runs) {
+        points += run.size();
+    }
+    return points;
+}
+
+} // namespace
+
+TEST_CASE("a figure draws a host's lines as it draws its own", "[figure][source]")
+{
+    const std::vector<double> first = walk(40000);
+    const std::vector<double> second = ramp(3000, -5.0, 0.01);
+    Figure own = figureOf({first, second});
+    Plot held;
+    held.addLine(first.data(), static_cast<long long>(first.size()), "line 0");
+    held.addLine(second.data(), static_cast<long long>(second.size()), "line 1");
+    CountingSource source(held);
+    Figure hosted = figureOver(source);
+
+    own.wheel(300.0, 200.0, 480.0, {});
+    hosted.wheel(300.0, 200.0, 480.0, {});
+    const Scene a = own.scene();
+    const Scene b = hosted.scene();
+    REQUIRE(a.area.x == b.area.x);
+    REQUIRE(a.x == b.x);
+    REQUIRE(a.y == b.y);
+    REQUIRE(a.lines.size() == b.lines.size());
+    for (std::size_t i = 0; i < a.lines.size(); ++i) {
+        REQUIRE(a.lines[i].runs == b.lines[i].runs);
+        REQUIRE(a.lines[i].colour == b.lines[i].colour);
+    }
+    REQUIRE(a.texts.size() == b.texts.size());
+
+    // A line is coloured by the series it is, not by where it is drawn: the
+    // host that left a line out before it hands over its series too.
+    source.seriesOffset = 1;
+    const Scene shifted = hosted.scene();
+    REQUIRE(shifted.lines[0].colour == a.lines[1].colour);
+    hosted.setSource(nullptr);
+    REQUIRE(hosted.scene().lines.empty());
+}
+
+TEST_CASE("a zoom tells the lines where it is heading, and a pan takes it back", "[figure][source]")
+{
+    Plot held;
+    const std::vector<double> values = walk(200000);
+    held.addLine(values.data(), static_cast<long long>(values.size()), "walk");
+    CountingSource source(held);
+    Figure figure = figureOver(source);
+    const PaneRect a = figure.scene().area;
+    const double px = a.x + 0.25 * a.width;
+    const double py = a.y + 0.5 * a.height;
+    const double under = figure.camera().dataXAt(px, py);
+
+    figure.wheel(px, py, 240.0, {});
+    REQUIRE(source.focused.size() == 1);
+    REQUIRE(source.focused.back().x == Approx(under));
+    REQUIRE(source.focused.back().factor > 1.0);
+
+    // y alone moves no x and is heading nowhere along it.
+    figure.wheel(px, py, 240.0, Modifiers{false, true, false});
+    REQUIRE(source.focused.size() == 1);
+
+    const int cleared = source.cleared;
+    figure.press(px, py, Button::Left, {});
+    figure.move(px + 30.0, py, {});
+    figure.release(px + 30.0, py, Button::Left, {});
+    REQUIRE(source.cleared > cleared);
+
+    figure.press(a.x + 0.4 * a.width, a.y + 0.2 * a.height, Button::Right, {});
+    figure.move(a.x + 0.6 * a.width, a.y + 0.8 * a.height, {});
+    figure.release(a.x + 0.6 * a.width, a.y + 0.8 * a.height, Button::Right, {});
+    REQUIRE(source.focused.size() == 2);
+
+    const int beforeReset = source.cleared;
+    figure.doubleClick(px, py, Button::Left);
+    REQUIRE(source.cleared == beforeReset + 1);
+}
+
+TEST_CASE("a frame asks each line what it spans once, however many lines there are",
+          "[figure][source]")
+{
+    Plot held;
+    const std::vector<double> values = walk(5000);
+    held.addLine(values.data(), static_cast<long long>(values.size()), "walk");
+    CountingSource source(held, 3000);
+    Figure figure = figureOver(source);
+    source.extents = 0;
+    source.xExtents = 0;
+    const Scene scene = figure.scene();
+    REQUIRE(scene.lines.size() == 3000);
+    REQUIRE(source.extents == 3000);
+    REQUIRE(source.xExtents == 3000);
+}
+
+TEST_CASE("ten thousand lines share one budget of vertices", "[figure][source]")
+{
+    Plot held;
+    const std::vector<double> values = walk(100000);
+    held.addLine(values.data(), static_cast<long long>(values.size()), "walk");
+
+    CountingSource one(held);
+    Figure alone = figureOver(one, 1600.0, 500.0);
+    const std::size_t full = pointsOf(alone.scene().lines.front());
+
+    CountingSource many(held, 10000);
+    Figure bundle = figureOver(many, 1600.0, 500.0);
+    SceneRequest runsOnly;
+    runsOnly.geometry.triangles = false;
+    runsOnly.geometry.values = false;
+    const Scene scene = bundle.scene(runsOnly);
+    std::size_t total = 0;
+    for (const DrawnLine& line : scene.lines) {
+        total += pointsOf(line);
+    }
+    // Two stroke vertices a point: the whole frame within the budget, and
+    // each line thinner than it is alone -- an envelope still, not a sample.
+    REQUIRE(2 * total <= static_cast<std::size_t>(kMaxVertices) + 8 * scene.lines.size());
+    REQUIRE(pointsOf(scene.lines.front()) < full);
+    REQUIRE(pointsOf(scene.lines.front()) > static_cast<std::size_t>(maxColumnsFor(10000)));
+}
+
+TEST_CASE("a scene carries the forms of a line a host asks for and no others", "[figure]")
+{
+    Figure figure = figureOf({ramp(500, 0.0, 1.0), walk(20000)});
+    SceneRequest strips;
+    strips.geometry.runs = false;
+    strips.geometry.triangles = false;
+    strips.geometry.values = false;
+    strips.geometry.strips = true;
+    const Scene lean = figure.scene(strips);
+    const Scene full = figure.scene();
+    REQUIRE(lean.lines.size() == full.lines.size());
+    for (std::size_t i = 0; i < lean.lines.size(); ++i) {
+        REQUIRE(lean.lines[i].runs.empty());
+        REQUIRE(lean.lines[i].triangles.empty());
+        REQUIRE(lean.lines[i].values.empty());
+        REQUIRE(lean.lines[i].strips.size() == full.lines[i].runs.size());
+        std::size_t triangles = 0;
+        for (std::size_t r = 0; r < lean.lines[i].strips.size(); ++r) {
+            const std::size_t points = full.lines[i].runs[r].size();
+            if (points > 1) {
+                REQUIRE(lean.lines[i].strips[r].size() == 2 * points);
+                triangles += 3 * (2 * points - 2);
+            }
+        }
+        // The same triangles, a third of the points.
+        REQUIRE(full.lines[i].triangles.size() == triangles);
+    }
+}
+
+TEST_CASE("a picture is the pane laid out again, and asks the lines for nothing",
+          "[figure][source]")
+{
+    Plot held;
+    const std::vector<double> values = ramp(400, 10.0, 0.5);
+    held.addLine(values.data(), static_cast<long long>(values.size()), "ramp");
+    CountingSource source(held);
+    Figure figure = figureOver(source);
+    const Scene pane = figure.scene();
+    const Point at = sampleAt(pane, 0, 150);
+    figure.hover(at.x(), at.y());
+    figure.press(pane.area.x + 10.0, pane.area.y + 10.0, Button::Right, {});
+    figure.move(pane.area.x + 200.0, pane.area.y + 150.0, {});
+    const Scene live = figure.scene();
+    REQUIRE(live.band.has_value());
+
+    SceneRequest request;
+    request.picture = true;
+    request.width = 1600.0;
+    request.height = 1000.0;
+    request.paper = true;
+    request.transparent = true;
+    const int news = source.news;
+    const Scene picture = figure.scene(request);
+    REQUIRE(source.news == news);
+    REQUIRE(picture.width == 1600.0);
+    REQUIRE(picture.height == 1000.0);
+    REQUIRE(picture.area.width > 2.0 * pane.area.width - 200.0);
+    REQUIRE_FALSE(picture.band.has_value());
+    REQUIRE_FALSE(picture.reading.valid);
+    REQUIRE(picture.ground.alpha == 0.0);
+    REQUIRE(picture.chrome.ink == chromeFor(true, true).ink);
+    REQUIRE(picture.x == live.x);
+
+    // ...and the pane is the pane again afterwards, gestures and all.
+    const Scene again = figure.scene();
+    REQUIRE(again.area.x == live.area.x);
+    REQUIRE(again.area.width == live.area.width);
+    REQUIRE(again.band.has_value());
+    REQUIRE(again.chrome.ink == live.chrome.ink);
+    figure.release(pane.area.x + 200.0, pane.area.y + 150.0, Button::Right, {});
+
+    // A crosshair named rather than pointed at lands where the picture drew
+    // its sample, which is the same share of the pane the pane drew it at.
+    figure.hover(at.x(), at.y());
+    const Scene hovered = figure.scene();
+    REQUIRE(hovered.reading.valid);
+    request.reading = PinnedSample{hovered.reading.line, hovered.reading.x, hovered.reading.y};
+    const Scene pinned = figure.scene(request);
+    REQUIRE(pinned.reading.valid);
+    REQUIRE(pinned.reading.x == hovered.reading.x);
+    REQUIRE((pinned.reading.at.x() - pinned.area.x) / pinned.area.width ==
+            Approx((hovered.reading.at.x() - hovered.area.x) / hovered.area.width));
+    REQUIRE((pinned.reading.at.y() - pinned.area.y) / pinned.area.height ==
+            Approx((hovered.reading.at.y() - hovered.area.y) / hovered.area.height));
+}

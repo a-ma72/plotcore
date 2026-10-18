@@ -57,6 +57,7 @@
 
 #include "plotcore/Types.hpp"
 
+#include <algorithm>
 #include <cmath>
 
 #include <optional>
@@ -403,10 +404,41 @@ struct PlotView
     /// The envelope bounds each *line* by the pane's width, which is the whole
     /// point of it -- but it does not bound their sum, and ten thousand lines
     /// at two vertices a column is forty million vertices whatever the pane
-    /// measures. PlotItem divides a fixed budget between the lines and passes
-    /// the share down here. See kMaxVertices in PlotItem.cpp.
+    /// measures. A fixed budget is divided between the lines and the share is
+    /// passed down here: see kMaxVertices and maxColumnsFor.
     int maxColumns = 0;
 };
+
+/// The most stroke vertices one frame may build, over every line together.
+///
+/// The envelope bounds each *line* by the pane's width, which is what makes a
+/// ten-million-point dataset draw in under a millisecond. It does not bound
+/// their sum: ten thousand lines at two points a column is forty million points
+/// however narrow the pane, and the viewer's evaluation branch measured exactly
+/// that arrangement reaching 3871 MiB.
+///
+/// So the budget is divided between the lines and each gets a share of the
+/// columns. The number is set from the frame rather than from the memory:
+/// building a stroke measures at about six nanoseconds a vertex, so two million
+/// of them is a little over a third of a frame at sixty hertz, with the
+/// projection and the upload still to pay for. At twenty bytes apiece it is
+/// also forty megabytes of buffer, which is the smaller of the two reasons to
+/// stop there.
+///
+/// It bites only above about five hundred lines. Sixty-four lines draw at one
+/// column a pixel on any pane; past the ceiling a line loses horizontal
+/// resolution and keeps its extremes, because that is what an envelope does --
+/// nothing goes missing, a spike may sit a few pixels from where it fell. Ten
+/// thousand overlapping hairlines is a picture of a distribution rather than of
+/// a line, and this is the honest way to lose detail nobody could have seen.
+inline constexpr int kMaxVertices = 2 << 20;
+
+/// Each line's share of kMaxVertices, as PlotView::maxColumns: two stroke
+/// vertices a projected point and two points a column.
+[[nodiscard]] inline int maxColumnsFor(int lines)
+{
+    return std::max(1, kMaxVertices / (4 * std::max(lines, 1)));
+}
 
 /// The logarithm of `value` to `base`.
 ///

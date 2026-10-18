@@ -30,6 +30,7 @@
 #include "plotcore/Budget.hpp"
 #include "plotcore/Camera.hpp"
 #include "plotcore/Levels.hpp"
+#include "plotcore/LineSource.hpp"
 #include "plotcore/Projection.hpp"
 #include "plotcore/Pyramid.hpp"
 
@@ -44,22 +45,13 @@ namespace plotcore {
 /// when it cannot. What a closer look below the pyramid's base asks.
 using LineReader = std::function<bool(long long first, long long count, double* out)>;
 
-/// The values of a line: its finite extent, and the smallest of it above zero,
-/// which is where a logarithmic y axis starts.
-struct LineExtent
-{
-    bool finite = false;
-    double minimum = 0.0;
-    double maximum = 0.0;
-    bool positive = false;
-    double positiveMinimum = 0.0;
-};
-
-class Plot
+/// Every line held whole, so every question a Figure asks of a LineSource is
+/// answered out of memory and the news it is told needs nothing read.
+class Plot : public LineSource
 {
 public:
     Plot();
-    ~Plot();
+    ~Plot() override;
     Plot(Plot&&) noexcept;
     Plot& operator=(Plot&&) noexcept;
     Plot(const Plot&) = delete;
@@ -78,13 +70,13 @@ public:
     void removeLine(int line);
     void clear();
 
-    [[nodiscard]] int lineCount() const;
-    [[nodiscard]] const std::string& name(int line) const;
+    [[nodiscard]] int lineCount() const override;
+    [[nodiscard]] std::string name(int line) const override;
     void setName(int line, std::string name);
     /// Elements of the line, as held.
-    [[nodiscard]] long long length(int line) const;
+    [[nodiscard]] long long length(int line) const override;
     /// Whether it has finished arriving.
-    [[nodiscard]] bool ready(int line) const;
+    [[nodiscard]] bool ready(int line) const override;
 
     // --- x -----------------------------------------------------------------
     /// The x of element `i` of a line with no time: `start + i * step`.
@@ -113,25 +105,25 @@ public:
 
     // --- what is being looked at -------------------------------------------
     /// Device-pixel columns of the pane: one bucket each.
-    void setPaneColumns(int columns);
+    void setPaneColumns(int columns) override;
     [[nodiscard]] int paneColumns() const { return columns_; }
     /// The window of x on screen, and whether the axis is logarithmic -- which
     /// decides what a column is.
-    void setView(double xLow, double xHigh, bool xLog);
+    void setView(double xLow, double xHigh, bool xLog) override;
 
     // --- answers ---------------------------------------------------------------
-    [[nodiscard]] LineExtent extent(int line) const;
+    [[nodiscard]] LineExtent extent(int line) const override;
     /// The finite x a line spans.
-    [[nodiscard]] Span xExtent(int line) const;
+    [[nodiscard]] Span xExtent(int line) const override;
     /// The smallest x of the line above zero, or 0.
-    [[nodiscard]] double xPositiveMinimum(int line) const;
+    [[nodiscard]] double xPositiveMinimum(int line) const override;
 
     /// The line as it is drawn now: a fold of its pyramid for the view and
     /// the pane, with the element of each extreme. Its arrays are the plot's
     /// and are valid until the next call that is not const.
-    [[nodiscard]] PlotLine drawLine(int line) const;
+    [[nodiscard]] PlotLine drawLine(int line) const override;
     /// The x axis that line is drawn against.
-    [[nodiscard]] PlotAxis drawAxis(int line) const;
+    [[nodiscard]] PlotAxis drawAxis(int line) const override;
 
 private:
     struct Line;

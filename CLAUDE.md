@@ -87,7 +87,7 @@ each define their own targets.
 
 | Path | What it is |
 |---|---|
-| `cpp/include/plotcore/`, `cpp/src/` | `plotcore::core`. The arithmetic: `Projection` (where a sample lands, gaps, the thinning, strokes as triangles), `Levels` (the fold and the policy over held runs), `Pyramid` (what every run is folded out of), `Budget` (what may be held), `Parallel` (the pool a large fold is spread over). The frame: `Format`, `Ticks`, `Camera`, `Palettes`. Then `Plot` (lines held) and `Figure` (the whole plot a host drives). `cpp/src/Json.*` is private. |
+| `cpp/include/plotcore/`, `cpp/src/` | `plotcore::core`. The arithmetic: `Projection` (where a sample lands, gaps, the thinning, strokes as triangles), `Levels` (the fold and the policy over held runs), `Pyramid` (what every run is folded out of), `Budget` (what may be held), `Parallel` (the pool a large fold is spread over). The frame: `Format`, `Ticks`, `Camera`, `Palettes`. Then `LineSource` (what a figure asks of its lines), `Plot` (lines held, and one such source) and `Figure` (the whole plot a host drives). `cpp/src/Json.*` is private. |
 | `cpp/tests/` | The Catch2 suites: `test_plotprojection`, `test_plotlevels`, `test_plotfigure`. |
 | `cpp/qt/`, `cpp/qt-demo/` | `plotcore::qt`, a `QWidget` over a `Figure`, and the Qt demo. |
 | `c/` | `plotcore.h`, `Figure` as C, built as `plotcore_c`, and `tests/test_capi.c`. |
@@ -133,7 +133,14 @@ answered:
   through `PyramidBuilder`, at the base the budget affords, with an optional
   `LineReader` below it. Every picture is a fold of what is held; with no
   reader, a window finer than the base is drawn *at* the base rather than from
-  the whole-line summary.
+  the whole-line summary. It is one **`LineSource`**: what a `Figure` asks of
+  its lines, and all it asks. A host that holds its lines its own way — the
+  viewer, reading a file on a thread under a shared budget — hands the figure
+  a source of its own (`Figure::setSource`); a line then also says which
+  *series* it is, so a line keeps its colour when the host leaves one before it
+  out. A figure asks each line what it spans once a frame, in `refresh()`:
+  the viewer's Plot tab is ten thousand lines, and a question asked per line
+  inside a loop over the lines is a hundred million.
 - **`Figure`** is the whole plot a host drives: lines, settings, the camera,
   the gestures, and a `Scene` out — strokes, rules and text in pane pixels with
   y down, flipping already applied. A host measures text, forwards events and
@@ -144,7 +151,12 @@ answered:
   in the common axis's extent and is numbered on it — an axis appearing beside
   the pane on the first pixel of a drag widened the gutter and moved every x
   under the pointer — and only a line on an axis of its own, or stacked, is
-  numbered beside the pane. `state()`/`restore()` write a view as JSON
+  numbered beside the pane. A scene is asked for with a `SceneRequest`: the
+  forms of a line a host draws (`SceneOptions`), and whether it is a
+  **picture** — the pane laid out again at another size, in the page's colours,
+  with a crosshair pinned to a sample — which asks the lines for nothing and
+  leaves the pane as it was. Every frame shares `kMaxVertices` between its
+  lines (`maxColumnsFor`). `state()`/`restore()` write a view as JSON
   (`cpp/src/Json.*`), passing over what they cannot read as the viewer's saved
   views do.
 - **`c/plotcore.h`** is `Figure` as C, built as one shared library
