@@ -4,11 +4,15 @@
 name: CI
 
 # Every commit, on every branch, plus pull requests from forks. Built,
-# tested and uploaded as artefacts; nothing here publishes anything.
+# tested and uploaded as artefacts; nothing here publishes anything. A tag is
+# a release, and release.yml runs this for it before publishing what it
+# built: run from here as well, every job would run twice on the tag.
 on:
   push:
+    branches: ["**"]
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
 # One run per ref, so three pushes in a minute leave one run going.
 concurrency:
@@ -174,8 +178,8 @@ jobs:
   # the manylinux_2_28 image, which is the RHEL 8 floor's glibc, and repaired
   # to that tag -- then installed on a plain runner and tested, PyQt6 and
   # matplotlib included, against the golden digest the C test wrote. Uploaded
-  # as an artefact and published nowhere; it is also what both of the PyQt6
-  # demo's packages carry.
+  # as an artefact, which is what both of the PyQt6 demo's packages carry and
+  # what release.yml publishes to PyPI.
   python:
     name: Python (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -271,6 +275,14 @@ jobs:
 
       - name: Test
         run: cargo test --workspace --locked
+
+      # The three libraries as crates.io receives them -- plotcore-sys
+      # carrying the core and the C interface through its links into cpp/ and
+      # c/ -- each then built from its package alone, against the others'
+      # packages. What release.yml publishes, from Linux, so checked here.
+      - name: Package the crates
+        if: runner.os == 'Linux'
+        run: cargo package --workspace --exclude egui-demo --locked
 
   # The three demos for Linux, as AppImages at H5Scope's floor, RHEL 8. Built
   # and checked inside manylinux_2_28 (AlmaLinux 8) by packaging/appimage, the

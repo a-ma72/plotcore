@@ -32,16 +32,22 @@ scene = figure.scene()             # strokes, rules and text, in pixels
 `plotcore.qt.PlotWidget` draws a figure in a PyQt6 widget (`pip install
 plotcore[qt]`). `plotcore.mpl` draws one on matplotlib's own axes, either
 once (`draw`) or live (`View`); install it with `pip install
-plotcore[matplotlib]`. `python/pyqt6-demo/demo.py` in the repository uses
-every feature on one window.
+plotcore[matplotlib]`. `python/pyqt6-demo/demo.py` in the
+[repository](https://github.com/jonassattler/plotcore) uses every feature on
+one window.
 
-## How it is built
+## Installing it
 
-The package loads plotcore's C interface (`c/plotcore.h`) with
-ctypes. It links no Python, so one wheel per platform serves every Python 3.
+    pip install plotcore
 
-The wheel is built from the repository, because its CMake project is the
-repository's root, one directory up:
+There are wheels for Linux on x86-64 with glibc 2.28 or newer (RHEL 8 and
+anything since) and for Windows on x64. The package loads plotcore's C
+interface (`c/plotcore.h`) with ctypes and links no Python, so one wheel per
+platform serves every Python 3.
+
+There is no source distribution, because the wheel's CMake project is the
+whole repository and not this directory. Anywhere else, build it from a
+checkout of the [repository](https://github.com/jonassattler/plotcore):
 
     pip install ./python
 

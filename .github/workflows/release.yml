@@ -1,0 +1,145 @@
+# SPDX-FileCopyrightText: 2026 Jonas Sattler
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: Release
+
+# A tag v<version> is a release of the commit it names. Everything CI does is
+# done again there (ci.yml, called from here), and what that built is
+# published: the demos and the wheels on a GitHub release, then the wheels on
+# PyPI and the crates on crates.io. The release's notes are the tag's
+# annotation, in Markdown below its subject line:
+#
+#   git tag -a v0.1.0
+#   git push origin v0.1.0
+#
+# The registries come last, because they are what cannot be taken back: a
+# version uploaded to PyPI or crates.io is that version for good, and a
+# release that fails before them has published nothing that cannot be
+# deleted.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  # The version is written in three places, and a tag that names another
+  # would publish the libraries under a number they do not say they are.
+  version:
+    name: The tag is the version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Compare them
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          cmake="$(sed -n 's/^project(plotcore VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)"
+          python="$(sed -n 's/^version = "\(.*\)"$/\1/p' python/pyproject.toml)"
+          rust="$(sed -n '/^\[workspace\.package\]/,/^\[/s/^version = "\(.*\)"$/\1/p' rust/Cargo.toml)"
+          echo "tag $tag; CMakeLists.txt $cmake, python/pyproject.toml $python, rust/Cargo.toml $rust"
+          if [ "$cmake" != "$tag" ] || [ "$python" != "$tag" ] || [ "$rust" != "$tag" ]; then
+            echo "::error::$GITHUB_REF_NAME is not the version the sources say they are"
+            exit 1
+          fi
+
+  ci:
+    name: CI
+    needs: version
+    uses: ./.github/workflows/ci.yml
+
+  # Each demo as one download -- an AppImage as it is, a Windows folder
+  # zipped with the folder in it -- beside the two wheels and a checksum of
+  # every file.
+  github:
+    name: GitHub release
+    needs: ci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      # checkout fetches the commit a tag names and writes the tag back as a
+      # lightweight one, without the annotation the notes are.
+      - name: Fetch the tag itself
+        run: git fetch --force origin "+refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: plotcore-*-demo-*
+          path: artefacts
+
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: plotcore-python-*
+          path: release
+          merge-multiple: true
+
+      - name: Put it together
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          mv artefacts/plotcore-*-demo-Linux/*.AppImage release/
+          for demo in qt egui pyqt6; do
+            mv "artefacts/plotcore-$demo-demo-Windows" "artefacts/plotcore-$demo-demo"
+            (cd artefacts && zip -q -r -9 "../release/plotcore-$demo-demo-$version-windows-x86_64.zip" "plotcore-$demo-demo")
+          done
+          (cd release && sha256sum -- * > SHA256SUMS)
+          ls -l release
+
+      - name: Publish it
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git tag -l --format='%(contents:body)' "$GITHUB_REF_NAME" > notes.md
+          gh release create "$GITHUB_REF_NAME" release/* --verify-tag \
+            --title "plotcore ${GITHUB_REF_NAME#v}" --notes-file notes.md
+
+  # The wheels CI built and tested, by trusted publishing: PyPI takes this
+  # job's OIDC token in place of a password, from this repository, this
+  # workflow and the pypi environment only. There is no sdist, for the reason
+  # python/README.md gives.
+  pypi:
+    name: PyPI
+    needs: github
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/plotcore/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: plotcore-python-*
+          path: dist
+          merge-multiple: true
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  # plotcore-sys, plotcore and plotcore-egui, in that order, each built from
+  # its package before it is uploaded, as CI's rust job does on every commit.
+  # By a token in the crates-io environment, because crates.io takes trusted
+  # publishing only for a crate it already has.
+  crates:
+    name: crates.io
+    needs: github
+    runs-on: ubuntu-latest
+    environment:
+      name: crates-io
+      url: https://crates.io/crates/plotcore
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v7
+
+      # With no name, rustup installs the one rust-toolchain.toml pins.
+      - name: Toolchain
+        run: rustup toolchain install
+
+      - name: Publish them
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish --workspace --exclude egui-demo --locked

@@ -6,12 +6,25 @@ name = "plotcore-sys"
 description = "plotcore's C interface, compiled in: the bindings plotcore is built on."
 links = "plotcore"
 build = "build.rs"
+# Through the links into the repository: the core and the C interface, and
+# nothing else of cpp/ and c/.
+include = [
+    "build.rs",
+    "src/**",
+    "csrc/**",
+    "cpp/include/**",
+    "cpp/src/**",
+    "c/plotcore.h",
+    "c/plotcore.cpp",
+    "LICENSE",
+]
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
+readme.workspace = true
 
 [build-dependencies]
 cc = "1.2"
