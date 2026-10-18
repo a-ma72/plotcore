@@ -186,12 +186,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # --no-deps: pip wheel otherwise writes numpy's wheel beside plotcore's,
+      # and the artefact carried both.
       - name: Build the wheel (manylinux_2_28)
         if: runner.os == 'Linux'
         run: |
           docker run --rm -v "$PWD:/io" -w /io quay.io/pypa/manylinux_2_28_x86_64 bash -c '
             set -e
-            /opt/python/cp312-cp312/bin/python -m pip wheel ./python -w /tmp/dist
+            /opt/python/cp312-cp312/bin/python -m pip wheel --no-deps ./python -w /tmp/dist
             auditwheel repair /tmp/dist/plotcore-*.whl -w /io/wheelhouse
             chmod -R a+rwX /io/wheelhouse'
 
@@ -201,7 +203,7 @@ jobs:
 
       - name: Build the wheel (Windows)
         if: runner.os == 'Windows'
-        run: python -m pip wheel ./python -w wheelhouse
+        run: python -m pip wheel --no-deps ./python -w wheelhouse
 
       # What PyQt6's own Qt needs from the system to start offscreen.
       - name: Install what Qt needs
