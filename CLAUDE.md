@@ -115,10 +115,11 @@ consequences:
   the answers exactly — values bit for bit, labels character for character,
   colours to a sixteen-bit step, JavaScript's own number formatting included.
   **A change to how an axis is numbered, ruled, zoomed or coloured is a change
-  to both, or the parity suite fails when the pin moves.** The arguments for
-  each rule are written over the QML, not repeated here. Every question that
-  suite asks is also recorded here with its answer (`cpp/tests/viewer/`), so
-  the rules stay held once the QML is gone.
+  to both, or the parity suite fails when the pin moves.** The argument for
+  each rule is written over its function in `Camera.cpp`, `Ticks.cpp` and
+  `Palettes.cpp`, carried there from the QML in the viewer's own words. Every
+  question that suite asks is also recorded here with its answer
+  (`cpp/tests/viewer/`), so the rules stay held once the QML is gone.
 - **The rules of the plot itself are written in H5Scope's CLAUDE.md** — the
   separate axes, the logarithmic axis and its edges, why a log x is folded per
   column, why an extreme is drawn at its element, what a zoom may read — and

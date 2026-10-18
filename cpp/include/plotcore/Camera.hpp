@@ -12,8 +12,8 @@
 // tst_plotcore_parity.qml holds them to it; Camera is the state they act on,
 // which PlotSurface keeps in its properties.
 //
-// The rules that hold it up are written over the QML and are not repeated
-// here, only named:
+// The rules that hold it up are argued over each function in Camera.cpp --
+// carried there from the QML they were first written over -- and named here:
 //
 // - **A gesture is arithmetic over decades** on a logarithmic axis
 //   (axisPosition is the one place that knows it), which is why a pan is in
