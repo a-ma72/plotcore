@@ -131,6 +131,16 @@ endif()
 # the example's self-test, and packs the example as an AppImage.
 option(PLOTCORE_WITH_QT "Build plotcore::qt and its example" OFF)
 if(PLOTCORE_WITH_QT)
+  # GL resolved the way a prebuilt Qt's own libraries resolve it, to
+  # libGL.so.1. Qt's CMake package links every Widgets program against
+  # OpenGL::GL, which CMake's FindOpenGL otherwise resolves through glvnd to
+  # libOpenGL.so.0 and libGLX.so.0 -- which the example never calls, which no
+  # Qt library asks for, and which a stock RHEL 8 does not have
+  # (libglvnd-opengl): the AppImage stopped there before main(). --as-needed
+  # does not drop them, because they resolve Qt's own references to libGL.
+  if(NOT DEFINED OpenGL_GL_PREFERENCE)
+    set(OpenGL_GL_PREFERENCE LEGACY)
+  endif()
   find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets)
   add_library(plotcore_qt STATIC
     qt/src/PlotWidget.cpp
