@@ -21,7 +21,7 @@ from typing import Callable, Dict, Iterator, Optional, Sequence, Tuple
 import numpy as np
 
 from . import _native
-from .scene import Colour, Scene, TextRole, copy_scene
+from .scene import FORM_ALL, Colour, Scene, TextRole, copy_scene
 
 _lib = _native.lib
 
@@ -496,8 +496,37 @@ class Figure:
 
     # --- the picture ---------------------------------------------------------------------
 
-    def scene(self) -> Scene:
-        handle = _lib.plotcore_scene_new(self._handle)
+    def scene(
+        self,
+        *,
+        forms: int = FORM_ALL,
+        picture: Optional[Tuple[float, float]] = None,
+        pixel_ratio: float = 0.0,
+        paper: bool = False,
+        transparent: bool = False,
+        reading: Optional[Tuple[int, float, float]] = None,
+    ) -> Scene:
+        """The picture as it stands: the lines in the `forms` asked for
+        (FORM_* or-ed together), and the marks to paint around them.
+
+        A `picture` of (width, height) is the pane laid out again at that size
+        -- for an image to take away -- from what the lines hold for the pane,
+        with no band, and with the crosshair only on the sample `reading`
+        names as (line, x, y). `paper` draws the light scope's picture and
+        `transparent` leaves out the ground."""
+        request = _native.SceneRequest()
+        request.forms = int(forms)
+        request.paper = int(paper)
+        request.transparent = int(transparent)
+        if picture is not None:
+            request.picture = 1
+            request.width, request.height = float(picture[0]), float(picture[1])
+            request.pixel_ratio = float(pixel_ratio)
+        if reading is not None:
+            request.pinned = 1
+            request.reading_line = int(reading[0])
+            request.reading_x, request.reading_y = float(reading[1]), float(reading[2])
+        handle = _lib.plotcore_scene_request_new(self._handle, ctypes.byref(request))
         if not handle:
             message = _lib.plotcore_last_error() or b""
             raise Error(4, message.decode("utf-8", "replace"))

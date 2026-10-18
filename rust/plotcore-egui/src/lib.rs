@@ -19,14 +19,12 @@
 //! never asked for a scene from inside `ui.input(...)` or any other closure
 //! that holds it.
 
-use std::f32::consts::FRAC_PI_2;
-
 use egui::epaint::{Mesh, TextShape};
 use egui::{
-    Align2, Color32, CornerRadius, Event, FontId, MouseWheelUnit, Painter, PointerButton, Pos2,
-    Rect, Response, Sense, Shape, Stroke, StrokeKind, Ui, Vec2,
+    Color32, CornerRadius, Event, FontId, MouseWheelUnit, Painter, PointerButton, Pos2, Rect,
+    Response, Sense, Shape, Stroke, StrokeKind, Ui, Vec2,
 };
-use plotcore::{Align, Button, Figure, Modifiers, Rgba, Scene, Text, TextRole};
+use plotcore::{Align, Button, Figure, Mark, MarkKind, Modifiers, Rgba, Scene, TextRole};
 
 /// How a line's stroke is painted.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -221,17 +219,7 @@ impl PlotView {
 
         if let Ok(scene) = self.figure.scene() {
             let fonts = TextRole::ALL.map(|role| self.font(role));
-            let raise = self.figure.style("exponentRaise").unwrap_or(4.0) as f32;
-            let line_width = self.figure.style("lineWidth").unwrap_or(1.0) as f32;
-            paint_scene(
-                &ui.painter_at(rect),
-                rect.min.to_vec2(),
-                &scene,
-                &fonts,
-                raise,
-                line_width,
-                self.strokes,
-            );
+            paint_scene(&ui.painter_at(rect), rect.min.to_vec2(), &scene, &fonts, self.strokes);
             self.last = Some(scene);
         }
         response
@@ -242,14 +230,7 @@ fn pos(offset: Vec2, x: f64, y: f64) -> Pos2 {
     Pos2::new(x as f32, y as f32) + offset
 }
 
-fn stroke(painter: &Painter, offset: Vec2, s: &plotcore::Segment) {
-    painter.line_segment(
-        [pos(offset, s.x0, s.y0), pos(offset, s.x1, s.y1)],
-        Stroke::new(s.width as f32, colour(s.colour)),
-    );
-}
-
-fn draw_text(painter: &Painter, offset: Vec2, text: &Text, fonts: &[FontId; 5], raise: f32) {
+fn draw_text(painter: &Painter, offset: Vec2, text: &Mark, fonts: &[FontId; 5]) {
     let ink = colour(text.colour);
     let base = if text.base.is_empty() { text.text.clone() } else { text.base.clone() };
     let base = painter.layout_no_wrap(base, fonts[role_slot(text.role)].clone(), ink);
@@ -268,16 +249,12 @@ fn draw_text(painter: &Painter, offset: Vec2, text: &Text, fonts: &[FontId; 5], 
         Align::End => -extent,
     };
     let (left, top) = (shift(text.across, width), shift(text.down, height));
-    let at = pos(offset, text.x, text.y);
-    // Turned a quarter anticlockwise about `at`: (x, y) goes to (y, -x).
-    let place = |dx: f32, dy: f32| {
-        if text.vertical {
-            at + Vec2::new(dy, -dx)
-        } else {
-            at + Vec2::new(dx, dy)
-        }
-    };
-    let angle = if text.vertical { -FRAC_PI_2 } else { 0.0 };
+    let at = pos(offset, text.x0, text.y0);
+    // Turned clockwise about `at`, and aligned in the turned frame.
+    let angle = (text.turn as f32).to_radians();
+    let (sin, cos) = angle.sin_cos();
+    let place = |dx: f32, dy: f32| at + Vec2::new(dx * cos - dy * sin, dx * sin + dy * cos);
+    let raise = text.raise as f32;
     painter.add(TextShape::new(place(left, top), base.clone(), ink).with_angle(angle));
     if let Some(exponent) = exponent {
         painter.add(
@@ -287,29 +264,70 @@ fn draw_text(painter: &Painter, offset: Vec2, text: &Text, fonts: &[FontId; 5], 
     }
 }
 
+fn paint_mark(painter: &Painter, pane: &Painter, offset: Vec2, mark: &Mark, fonts: &[FontId; 5]) {
+    let painter = if mark.clipped { pane } else { painter };
+    let edge = Stroke::new(mark.width as f32, colour(mark.stroke));
+    let fill = colour(mark.fill);
+    match mark.kind {
+        MarkKind::Segment => {
+            painter
+                .line_segment([pos(offset, mark.x0, mark.y0), pos(offset, mark.x1, mark.y1)], edge);
+        }
+        MarkKind::Box => {
+            let r =
+                Rect::from_two_pos(pos(offset, mark.x0, mark.y0), pos(offset, mark.x1, mark.y1));
+            let corners = CornerRadius::same(mark.radius.round().clamp(0.0, 255.0) as u8);
+            if mark.fill.alpha > 0.0 {
+                painter.rect_filled(r, corners, fill);
+            }
+            if mark.width > 0.0 {
+                if mark.dashed {
+                    let corners = [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom()];
+                    let path = [corners[0], corners[1], corners[2], corners[3], corners[0]];
+                    let dash = 4.0 * mark.width as f32;
+                    painter.extend(Shape::dashed_line(&path, edge, dash, dash));
+                } else {
+                    painter.rect_stroke(r, corners, edge, StrokeKind::Middle);
+                }
+            }
+        }
+        MarkKind::Circle => {
+            let centre = pos(offset, mark.x0, mark.y0);
+            if mark.fill.alpha > 0.0 {
+                painter.circle_filled(centre, mark.radius as f32, fill);
+            }
+            if mark.width > 0.0 {
+                painter.circle_stroke(centre, mark.radius as f32, edge);
+            }
+        }
+        MarkKind::Text => draw_text(painter, offset, mark, fonts),
+    }
+}
+
 /// Paint `scene` with `painter`, `offset` from its pane origin: all a host
-/// other than [`PlotView`] needs to draw a figure in egui.
+/// other than [`PlotView`] needs to draw a figure in egui. Every colour, width
+/// and place is the scene's.
 pub fn paint_scene(
     painter: &Painter,
     offset: Vec2,
     scene: &Scene,
     fonts: &[FontId; 5],
-    exponent_raise: f32,
-    line_width: f32,
     strokes: Strokes,
 ) {
     let whole =
         Rect::from_min_size(offset.to_pos2(), Vec2::new(scene.width as f32, scene.height as f32));
-    painter.rect_filled(whole, CornerRadius::ZERO, colour(scene.ground));
-    for rule in &scene.rules {
-        stroke(painter, offset, rule);
+    if scene.ground.alpha > 0.0 {
+        painter.rect_filled(whole, CornerRadius::ZERO, colour(scene.ground));
     }
-
     let area = Rect::from_min_size(
         pos(offset, scene.area.x, scene.area.y),
         Vec2::new(scene.area.width as f32, scene.area.height as f32),
     );
     let pane = painter.with_clip_rect(area);
+    for mark in &scene.under {
+        paint_mark(painter, &pane, offset, mark, fonts);
+    }
+
     for line in &scene.lines {
         let ink = colour(line.colour);
         match strokes {
@@ -333,86 +351,8 @@ pub fn paint_scene(
         }
     }
 
-    for s in &scene.strokes {
-        stroke(painter, offset, s);
-    }
-    for text in &scene.texts {
-        draw_text(painter, offset, text, fonts, exponent_raise);
-    }
-
-    let chrome = &scene.chrome;
-    let veiled = |c: Rgba| {
-        let c = colour(c);
-        Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), 217)
-    };
-    if let Some(box_) = &scene.legend_rect {
-        let r = Rect::from_min_size(
-            pos(offset, box_.x, box_.y),
-            Vec2::new(box_.width as f32, box_.height as f32),
-        );
-        painter.rect_filled(r, CornerRadius::ZERO, veiled(scene.ground));
-        painter.rect_stroke(
-            r,
-            CornerRadius::ZERO,
-            Stroke::new(1.0, colour(chrome.axis_rule)),
-            StrokeKind::Inside,
-        );
-        for entry in &scene.legend {
-            let [x0, y0, x1, y1] = entry.swatch;
-            painter.line_segment(
-                [pos(offset, x0, y0), pos(offset, x1, y1)],
-                Stroke::new(2.0 * line_width, colour(entry.colour)),
-            );
-            painter.text(
-                pos(offset, entry.text_at[0], entry.text_at[1]),
-                Align2::LEFT_CENTER,
-                &entry.name,
-                fonts[role_slot(TextRole::Legend)].clone(),
-                colour(chrome.ink),
-            );
-        }
-    }
-
-    if let Some(reading) = &scene.reading {
-        painter.circle_stroke(
-            pos(offset, reading.px, reading.py),
-            3.0,
-            Stroke::new(1.0, colour(chrome.cursor_ink)),
-        );
-        let readout = format!("x {}   y {}", reading.x_text, reading.y_text);
-        let galley = painter.layout_no_wrap(
-            readout,
-            fonts[role_slot(TextRole::Tick)].clone(),
-            colour(chrome.ink),
-        );
-        let corner = area.min + Vec2::splat(8.0);
-        let box_ = Rect::from_min_size(corner, galley.size() + Vec2::splat(8.0));
-        painter.rect_filled(box_, CornerRadius::ZERO, veiled(scene.ground));
-        painter.galley(corner + Vec2::splat(4.0), galley, colour(chrome.ink));
-    }
-
-    if let Some(band) = &scene.band {
-        let r = Rect::from_min_size(
-            pos(offset, band.x, band.y),
-            Vec2::new(band.width as f32, band.height as f32),
-        );
-        let ink = colour(chrome.cursor_ink);
-        painter.rect_filled(
-            r,
-            CornerRadius::ZERO,
-            Color32::from_rgba_unmultiplied(ink.r(), ink.g(), ink.b(), 31),
-        );
-        painter.rect_stroke(r, CornerRadius::ZERO, Stroke::new(1.0, ink), StrokeKind::Inside);
-    }
-
-    if !scene.message.is_empty() {
-        let galley = painter.layout(
-            scene.message.clone(),
-            fonts[role_slot(TextRole::AxisName)].clone(),
-            colour(chrome.ink),
-            area.width() - 24.0,
-        );
-        painter.galley(area.center() - galley.size() / 2.0, galley, colour(chrome.ink));
+    for mark in &scene.over {
+        paint_mark(painter, &pane, offset, mark, fonts);
     }
 }
 
@@ -465,7 +405,7 @@ mod tests {
             .count();
         assert_eq!(meshes, 1, "the line is plotcore's own triangles");
         // egui measured the numbers: the left gutter is as wide as they are.
-        assert!(scene.area.x > 0.0 && !scene.texts.is_empty());
+        assert!(scene.area.x > 0.0 && scene.texts().next().is_some());
     }
 
     #[test]

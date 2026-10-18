@@ -28,7 +28,7 @@ from ctypes import (
 )
 from pathlib import Path
 
-ABI_VERSION = 1
+ABI_VERSION = 2
 
 
 class Rgba(Structure):
@@ -50,17 +50,6 @@ class Rect(Structure):
     _fields_ = [("x", c_double), ("y", c_double), ("width", c_double), ("height", c_double)]
 
 
-class Segment(Structure):
-    _fields_ = [
-        ("x0", c_double),
-        ("y0", c_double),
-        ("x1", c_double),
-        ("y1", c_double),
-        ("colour", Rgba),
-        ("width", c_double),
-    ]
-
-
 class LineInfo(Structure):
     _fields_ = [
         ("line", c_int32),
@@ -78,18 +67,45 @@ class LineInfo(Structure):
     ]
 
 
-class Text(Structure):
+class Mark(Structure):
     _fields_ = [
-        ("x", c_double),
-        ("y", c_double),
+        ("kind", c_int32),
+        ("layer", c_int32),
+        ("clipped", c_int32),
+        ("dashed", c_int32),
+        ("role", c_int32),
         ("across", c_int32),
         ("down", c_int32),
-        ("role", c_int32),
-        ("vertical", c_int32),
+        ("x0", c_double),
+        ("y0", c_double),
+        ("x1", c_double),
+        ("y1", c_double),
+        ("fill", Rgba),
+        ("stroke", Rgba),
+        ("width", c_double),
+        ("radius", c_double),
         ("colour", Rgba),
+        ("turn", c_double),
+        ("raise_", c_double),
         ("text", c_char_p),
         ("base", c_char_p),
         ("exponent", c_char_p),
+    ]
+
+
+class SceneRequest(Structure):
+    _fields_ = [
+        ("forms", c_int32),
+        ("picture", c_int32),
+        ("paper", c_int32),
+        ("transparent", c_int32),
+        ("pinned", c_int32),
+        ("reading_line", c_int32),
+        ("width", c_double),
+        ("height", c_double),
+        ("pixel_ratio", c_double),
+        ("reading_x", c_double),
+        ("reading_y", c_double),
     ]
 
 
@@ -201,6 +217,7 @@ _DECLARATIONS = {
     "plotcore_state": (_status, [_figure, c_char_p, c_int64, POINTER(c_int64)]),
     "plotcore_restore": (_status, [_figure, c_char_p]),
     "plotcore_scene_new": (_scene, [_figure]),
+    "plotcore_scene_request_new": (_scene, [_figure, POINTER(SceneRequest)]),
     "plotcore_scene_free": (None, [_scene]),
     "plotcore_scene_size": (None, [_scene, _doubles, _doubles]),
     "plotcore_scene_ground": (Rgba, [_scene]),
@@ -214,13 +231,13 @@ _DECLARATIONS = {
     "plotcore_scene_line_run": (_doubles, [_scene, c_int64, c_int64]),
     "plotcore_scene_line_run_values": (_doubles, [_scene, c_int64, c_int64]),
     "plotcore_scene_line_triangles": (_doubles, [_scene, c_int64]),
+    "plotcore_scene_line_strip_length": (c_int64, [_scene, c_int64, c_int64]),
+    "plotcore_scene_line_strip": (_doubles, [_scene, c_int64, c_int64]),
     "plotcore_scene_line_markers": (_doubles, [_scene, c_int64]),
-    "plotcore_scene_rule_count": (c_int64, [_scene]),
-    "plotcore_scene_rules": (POINTER(Segment), [_scene]),
-    "plotcore_scene_stroke_count": (c_int64, [_scene]),
-    "plotcore_scene_strokes": (POINTER(Segment), [_scene]),
-    "plotcore_scene_text_count": (c_int64, [_scene]),
-    "plotcore_scene_text": (_status, [_scene, c_int64, POINTER(Text)]),
+    "plotcore_scene_under_count": (c_int64, [_scene]),
+    "plotcore_scene_under": (_status, [_scene, c_int64, POINTER(Mark)]),
+    "plotcore_scene_over_count": (c_int64, [_scene]),
+    "plotcore_scene_over": (_status, [_scene, c_int64, POINTER(Mark)]),
     "plotcore_scene_legend_count": (c_int64, [_scene]),
     "plotcore_scene_legend": (_status, [_scene, c_int64, POINTER(LegendEntry)]),
     "plotcore_scene_legend_rect": (Rect, [_scene]),

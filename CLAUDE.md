@@ -142,9 +142,14 @@ answered:
   the viewer's Plot tab is ten thousand lines, and a question asked per line
   inside a loop over the lines is a hundred million.
 - **`Figure`** is the whole plot a host drives: lines, settings, the camera,
-  the gestures, and a `Scene` out — strokes, rules and text in pane pixels with
-  y down, flipping already applied. A host measures text, forwards events and
-  paints; it decides nothing. Three things are this layer's own, all from
+  the gestures, and a `Scene` out in pane pixels with y down, flipping already
+  applied: the lines, and the **marks** to paint under and over them in order —
+  segments, boxes, circles and text, every colour, width and radius decided.
+  A host measures text, forwards events and translates each mark into its
+  toolkit's call; it decides nothing. The hosts used to draw the crosshair, the
+  legend and the band themselves, and no two drew the same ones. A mark's
+  *layer* (grid, frame, overlay) is for a host that draws some of it its own
+  way: matplotlib draws its own frame and paints the overlay. Three things are this layer's own, all from
   jonassattler/H5Scope#30 and all about a line: **moved and scaled**
   (`LineSettings::scale`/`shift`, Alt-drag, Alt+Control+wheel, Control-click to
   put back), **stacked** in bands, and **a time per line**. A moved line stays

@@ -174,10 +174,46 @@ static void contract(void)
     const double* run = plotcore_scene_line_run(scene, 1, 0);
     CHECK(run != NULL && run[0] < run[2]);
     CHECK(info.triangle_points % 3 == 0 && info.triangle_points > 0);
-    CHECK(plotcore_scene_text_count(scene) > 0);
-    plotcore_text text;
-    CHECK(plotcore_scene_text(scene, 0, &text) == PLOTCORE_OK && text.text != NULL);
-    CHECK(plotcore_scene_text(scene, -1, &text) == PLOTCORE_ERROR_RANGE);
+    CHECK(plotcore_scene_over_count(scene) > 0);
+    plotcore_mark mark;
+    int texts = 0;
+    for (int64_t i = 0; i < plotcore_scene_over_count(scene); ++i) {
+        CHECK(plotcore_scene_over(scene, i, &mark) == PLOTCORE_OK);
+        if (mark.kind == PLOTCORE_MARK_TEXT) {
+            CHECK(mark.text != NULL && mark.base != NULL && mark.exponent != NULL);
+            ++texts;
+        }
+        else {
+            CHECK(mark.text == NULL);
+        }
+    }
+    CHECK(texts > 0);
+    CHECK(plotcore_scene_over(scene, -1, &mark) == PLOTCORE_ERROR_RANGE);
+    CHECK(plotcore_scene_under(scene, plotcore_scene_under_count(scene), &mark) ==
+          PLOTCORE_ERROR_RANGE);
+    plotcore_scene_free(scene);
+
+    /* A scene asked for strips alone carries them and nothing it was not
+     * asked for; a picture of another size asks the lines for nothing. */
+    plotcore_scene_request request = {0};
+    request.forms = PLOTCORE_FORM_STRIPS;
+    scene = plotcore_scene_request_new(figure, &request);
+    CHECK(scene != NULL && plotcore_scene_line(scene, 1, &info) == PLOTCORE_OK);
+    CHECK(info.run_count == 1 && info.triangle_points == 0);
+    CHECK(plotcore_scene_line_run(scene, 1, 0) == NULL);
+    CHECK(plotcore_scene_line_strip_length(scene, 1, 0) == 600);
+    plotcore_scene_free(scene);
+    request.forms = PLOTCORE_FORM_ALL;
+    request.picture = 1;
+    request.width = 1200;
+    request.height = 900;
+    request.transparent = 1;
+    scene = plotcore_scene_request_new(figure, &request);
+    double pictureWidth = 0;
+    double pictureHeight = 0;
+    plotcore_scene_size(scene, &pictureWidth, &pictureHeight);
+    CHECK(pictureWidth == 1200 && pictureHeight == 900);
+    CHECK(plotcore_scene_ground(scene).alpha == 0);
     plotcore_scene_free(scene);
 
     /* A reader's context is let go once: when it is replaced, here. */
@@ -268,17 +304,61 @@ static void colour(Out* out, plotcore_rgba c)
     put(out, " " G " " G " " G " " G, c.red, c.green, c.blue, c.alpha);
 }
 
-static void segments(Out* out, const char* what, const plotcore_segment* s, int64_t count)
+typedef plotcore_status (*MarkAt)(const plotcore_scene*, int64_t, plotcore_mark*);
+
+/* The segments of one layer as a count and sums, and every other mark on a
+ * line of its own, in the order it is painted. */
+static void marks(Out* out, const char* what, plotcore_scene* scene, int64_t count, MarkAt at)
 {
-    double x = 0;
-    double y = 0;
-    for (int64_t i = 0; i < count; ++i) {
-        x += s[i].x0;
-        x += s[i].x1;
-        y += s[i].y0;
-        y += s[i].y1;
+    for (int layer = PLOTCORE_LAYER_GRID; layer <= PLOTCORE_LAYER_OVERLAY; ++layer) {
+        long long segments = 0;
+        double x = 0;
+        double y = 0;
+        double width = 0;
+        for (int64_t i = 0; i < count; ++i) {
+            plotcore_mark m;
+            at(scene, i, &m);
+            if (m.kind == PLOTCORE_MARK_SEGMENT && m.layer == layer) {
+                ++segments;
+                x += m.x0;
+                x += m.x1;
+                y += m.y0;
+                y += m.y1;
+                width += m.width;
+            }
+        }
+        if (segments > 0) {
+            put(out, "%s segments %d %lld " G " " G " " G "\n", what, layer, segments, x, y, width);
+        }
     }
-    put(out, "%s %lld " G " " G "\n", what, (long long)count, x, y);
+    for (int64_t i = 0; i < count; ++i) {
+        plotcore_mark m;
+        at(scene, i, &m);
+        switch (m.kind) {
+        case PLOTCORE_MARK_BOX:
+            put(out, "%s box %d %d %d " G " " G " " G " " G, what, m.layer, m.clipped, m.dashed,
+                m.x0, m.y0, m.x1, m.y1);
+            colour(out, m.fill);
+            colour(out, m.stroke);
+            put(out, " " G " " G "\n", m.width, m.radius);
+            break;
+        case PLOTCORE_MARK_CIRCLE:
+            put(out, "%s circle %d %d " G " " G " " G, what, m.layer, m.clipped, m.x0, m.y0,
+                m.radius);
+            colour(out, m.fill);
+            colour(out, m.stroke);
+            put(out, " " G "\n", m.width);
+            break;
+        case PLOTCORE_MARK_TEXT:
+            put(out, "%s text %d %d %d %d " G " " G " " G, what, m.layer, m.role, m.across, m.down,
+                m.turn, m.x0, m.y0);
+            colour(out, m.colour);
+            put(out, " |%s\n", m.text);
+            break;
+        default:
+            break;
+        }
+    }
 }
 
 static void digest(Out* out, plotcore_scene* scene, int index)
@@ -330,15 +410,8 @@ static void digest(Out* out, plotcore_scene* scene, int index)
         put(out, "window " G " " G " %d %d %d " G " " G "\n", info.y_low, info.y_high, info.y_log,
             info.own, info.numbered, vx, vy);
     }
-    segments(out, "rules", plotcore_scene_rules(scene), plotcore_scene_rule_count(scene));
-    segments(out, "strokes", plotcore_scene_strokes(scene), plotcore_scene_stroke_count(scene));
-    for (int64_t i = 0; i < plotcore_scene_text_count(scene); ++i) {
-        plotcore_text t;
-        plotcore_scene_text(scene, i, &t);
-        put(out, "text %d %d %d %d " G " " G, t.role, t.across, t.down, t.vertical, t.x, t.y);
-        colour(out, t.colour);
-        put(out, " |%s\n", t.text);
-    }
+    marks(out, "under", scene, plotcore_scene_under_count(scene), plotcore_scene_under);
+    marks(out, "over", scene, plotcore_scene_over_count(scene), plotcore_scene_over);
     const int64_t legend = plotcore_scene_legend_count(scene);
     for (int64_t i = 0; i < legend; ++i) {
         plotcore_legend_entry e;

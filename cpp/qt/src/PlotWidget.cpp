@@ -124,15 +124,19 @@ QImage PlotWidget::render(QSize size, double scale)
                  static_cast<int>(std::lround(height * scale)),
                  QImage::Format_ARGB32_Premultiplied);
     image.setDevicePixelRatio(scale);
-    // Laid out at the size asked for, and put back: the pane goes on being
-    // the pane.
-    figure_.setSize(width, height, scale);
-    const Scene picture = figure_.scene();
+    image.fill(Qt::transparent);
+    // Laid out at the size asked for, as a picture: the pane goes on being the
+    // pane, and the lines are asked for nothing on the picture's account.
+    SceneRequest request;
+    request.picture = true;
+    request.width = width;
+    request.height = height;
+    request.pixelRatio = scale;
+    const Scene picture = figure_.scene(request);
     {
         QPainter painter(&image);
         paintScene(painter, picture);
     }
-    figure_.setSize(this->width(), this->height(), devicePixelRatioF());
     return image;
 }
 
@@ -163,9 +167,7 @@ void PlotWidget::drawText(QPainter& painter, const TextItem& text) const
 
     painter.save();
     painter.translate(qpoint(text.at));
-    if (text.vertical) {
-        painter.rotate(-90.0);
-    }
+    painter.rotate(text.turn);
     const double left = offset(text.across, width);
     const double top = offset(text.down, height);
     painter.setPen(qcolor(text.colour));
@@ -173,35 +175,75 @@ void PlotWidget::drawText(QPainter& painter, const TextItem& text) const
     painter.drawText(QPointF(left, top + metrics.ascent()), base);
     if (!exponent.isEmpty()) {
         painter.setFont(raised);
-        painter.drawText(
-            QPointF(left + baseWidth, top + metrics.ascent() - figure_.style().exponentRaise),
-            exponent);
+        painter.drawText(QPointF(left + baseWidth, top + metrics.ascent() - text.raise), exponent);
+    }
+    painter.restore();
+}
+
+void PlotWidget::paintMark(QPainter& painter, const Mark& mark, const QRectF& area) const
+{
+    painter.save();
+    if (mark.clipped) {
+        painter.setClipRect(area);
+    }
+    if (mark.kind == Mark::Kind::Text) {
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        drawText(painter, mark.text);
+        painter.restore();
+        return;
+    }
+    if (mark.width > 0.0) {
+        QPen pen(qcolor(mark.stroke), mark.width);
+        pen.setCapStyle(Qt::FlatCap);
+        if (mark.dashed) {
+            pen.setStyle(Qt::DashLine);
+        }
+        painter.setPen(pen);
+    }
+    else {
+        painter.setPen(Qt::NoPen);
+    }
+    painter.setBrush(mark.fill.alpha > 0.0 ? QBrush(qcolor(mark.fill)) : QBrush(Qt::NoBrush));
+    switch (mark.kind) {
+    case Mark::Kind::Segment:
+        // Crisp rather than smeared over two rows.
+        painter.setRenderHint(QPainter::Antialiasing, false);
+        painter.drawLine(qpoint(mark.from), qpoint(mark.to));
+        break;
+    case Mark::Kind::Box: {
+        const QRectF box(qpoint(mark.from), qpoint(mark.to));
+        painter.setRenderHint(QPainter::Antialiasing, mark.radius > 0.0);
+        if (mark.radius > 0.0) {
+            painter.drawRoundedRect(box, mark.radius, mark.radius);
+        }
+        else {
+            painter.drawRect(box);
+        }
+        break;
+    }
+    case Mark::Kind::Circle:
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        painter.drawEllipse(qpoint(mark.from), mark.radius, mark.radius);
+        break;
+    case Mark::Kind::Text:
+        break;
     }
     painter.restore();
 }
 
 void PlotWidget::paintScene(QPainter& painter, const Scene& scene) const
 {
-    const FigureStyle& style = figure_.style();
     painter.setRenderHint(QPainter::Antialiasing, true);
-    painter.fillRect(QRectF(0, 0, scene.width, scene.height), qcolor(scene.ground));
-
-    const auto stroke = [&](const Segment& segment) {
-        QPen pen(qcolor(segment.colour), segment.width);
-        pen.setCapStyle(Qt::FlatCap);
-        painter.setPen(pen);
-        painter.drawLine(qpoint(segment.from), qpoint(segment.to));
-    };
-
-    // The rules, under everything; crisp rather than smeared over two rows.
-    painter.setRenderHint(QPainter::Antialiasing, false);
-    for (const Segment& rule : scene.rules) {
-        stroke(rule);
+    if (scene.ground.alpha > 0.0) {
+        painter.fillRect(QRectF(0, 0, scene.width, scene.height), qcolor(scene.ground));
+    }
+    const QRectF area(scene.area.x, scene.area.y, scene.area.width, scene.area.height);
+    for (const Mark& mark : scene.under) {
+        paintMark(painter, mark, area);
     }
 
     // The lines, inside the pane: a run drawn past either end is clipped here
     // as the viewer's item clips it.
-    const QRectF area(scene.area.x, scene.area.y, scene.area.width, scene.area.height);
     painter.save();
     painter.setClipRect(area);
     painter.setRenderHint(QPainter::Antialiasing, true);
@@ -234,79 +276,8 @@ void PlotWidget::paintScene(QPainter& painter, const Scene& scene) const
     }
     painter.restore();
 
-    // The axes, the ticks and the crosshair.
-    painter.setRenderHint(QPainter::Antialiasing, false);
-    for (const Segment& segment : scene.strokes) {
-        stroke(segment);
-    }
-    painter.setRenderHint(QPainter::Antialiasing, true);
-    for (const TextItem& text : scene.texts) {
-        drawText(painter, text);
-    }
-
-    const Chrome& chrome = scene.chrome;
-
-    // The legend: a swatch and a name a row.
-    if (!scene.legend.empty()) {
-        const QRectF box(scene.legendRect.x, scene.legendRect.y, scene.legendRect.width,
-                         scene.legendRect.height);
-        QColor ground = qcolor(scene.ground);
-        ground.setAlphaF(0.85f);
-        painter.setPen(QPen(qcolor(chrome.axisRule), style.ruleWidth));
-        painter.setBrush(ground);
-        painter.drawRect(box);
-        painter.setBrush(Qt::NoBrush);
-        for (const LegendEntry& entry : scene.legend) {
-            painter.setPen(QPen(qcolor(entry.colour), 2.0 * style.lineWidth));
-            painter.drawLine(qpoint(entry.from), qpoint(entry.to));
-            TextItem name;
-            name.text = name.base = entry.name;
-            name.at = entry.textAt;
-            name.down = TextItem::Align::Middle;
-            name.role = TextRole::Legend;
-            name.colour = chrome.ink;
-            drawText(painter, name);
-        }
-    }
-
-    // The sample under the pointer, and what it reads.
-    if (scene.reading.valid) {
-        const Reading& reading = scene.reading;
-        painter.setPen(QPen(qcolor(chrome.cursorInk), style.ruleWidth));
-        painter.setBrush(Qt::NoBrush);
-        painter.drawEllipse(qpoint(reading.at), 3.0, 3.0);
-        const QFont font = roleFont(TextRole::Tick);
-        const QFontMetricsF metrics(font);
-        const QString readout =
-            QStringLiteral("x %1   y %2")
-                .arg(QString::fromStdString(reading.xText), QString::fromStdString(reading.yText));
-        const QRectF box(area.x() + style.gapM, area.y() + style.gapM,
-                         metrics.horizontalAdvance(readout) + 2 * style.gapS,
-                         metrics.height() + 2 * style.gapS);
-        QColor ground = qcolor(scene.ground);
-        ground.setAlphaF(0.85f);
-        painter.fillRect(box, ground);
-        painter.setFont(font);
-        painter.setPen(qcolor(chrome.ink));
-        painter.drawText(QPointF(box.x() + style.gapS, box.y() + style.gapS + metrics.ascent()),
-                         readout);
-    }
-
-    if (scene.band.has_value()) {
-        const PaneRect& band = *scene.band;
-        QColor fill = qcolor(chrome.cursorInk);
-        fill.setAlphaF(0.12f);
-        painter.setPen(QPen(qcolor(chrome.cursorInk), style.ruleWidth, Qt::DashLine));
-        painter.setBrush(fill);
-        painter.drawRect(QRectF(band.x, band.y, band.width, band.height));
-        painter.setBrush(Qt::NoBrush);
-    }
-
-    if (!scene.message.empty()) {
-        painter.setFont(roleFont(TextRole::AxisName));
-        painter.setPen(qcolor(chrome.ink));
-        painter.drawText(area.adjusted(style.gapL, style.gapL, -style.gapL, -style.gapL),
-                         Qt::AlignCenter | Qt::TextWordWrap, QString::fromStdString(scene.message));
+    for (const Mark& mark : scene.over) {
+        paintMark(painter, mark, area);
     }
 }
 

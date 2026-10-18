@@ -11,11 +11,12 @@
 // and PlotItem, in one object a host can drive without knowing any of them.
 // The host does three things and nothing else: it hands over the pane's size
 // and how to measure text, it forwards the pointer and the wheel, and it
-// paints the Scene that comes back -- strokes, rules, text, in pane pixels with
-// y down. Every decision between those is plotcore's, so a plot drawn from Qt,
-// from Python and from Rust is the same plot: the same ticks at the same
-// places, the same gestures moving the same windows, the same line in the same
-// colour (golden/ holds the three to one another).
+// paints the Scene that comes back -- the lines, and the marks to paint
+// around them in order, in pane pixels with y down. Every decision between
+// those is plotcore's, so a plot drawn from Qt, from Python and from Rust is
+// the same plot: the same ticks at the same places, the same gestures moving
+// the same windows, the same line in the same colour (golden/ holds the three
+// to one another).
 //
 // The viewer's rules hold here as they do there, because the arithmetic is the
 // viewer's -- Ticks.hpp and Camera.hpp are PlotFrame's and PlotSurface's,
@@ -138,6 +139,11 @@ struct FigureSettings
     int highlighted = -1;
     /// Lines drawn under one another, as a bundle of rows is.
     bool bundle = false;
+    /// Whether the reading under the pointer is written in the pane, in a
+    /// box in its corner. A host that writes it somewhere of its own -- the
+    /// viewer prints it in the bar under the plot -- turns it off and reads
+    /// Scene::reading.
+    bool readout = true;
     /// The ground the picture is for.
     bool dark = true;
     /// The picture a page would draw: the light scope, whatever is on screen.
@@ -181,15 +187,6 @@ struct Modifiers
     bool alt = false;
 };
 
-/// A straight stroke: a rule, a tick, an axis.
-struct Segment
-{
-    Point from;
-    Point to;
-    Rgba colour;
-    double width = 1.0;
-};
-
 /// A piece of text, at a point and an alignment. `base` is set in `role`'s
 /// face, `exponent` raised beside it in TickMinor's; `text` is the whole of it
 /// in one string with the exponent in superscript digits, for a host that sets
@@ -211,8 +208,63 @@ struct TextItem
     Align down = Align::Start;
     TextRole role = TextRole::Tick;
     Rgba colour;
-    /// Turned a quarter anticlockwise about `at`, as an axis name up the side is.
-    bool vertical = false;
+    /// Turned about `at` by this many degrees, clockwise on the pane, and
+    /// aligned in the turned frame: -90 runs up the side, as an axis name does.
+    double turn = 0.0;
+    /// How far the exponent's baseline sits above the base's.
+    double raise = 0.0;
+};
+
+/// One thing to paint, in pane pixels with y down.
+///
+/// A scene lists them in the order they are painted, and a host translates
+/// each into its toolkit's call and decides nothing about it: every colour,
+/// width and radius is here. That is what makes a plot drawn from Qt, from
+/// Python and from Rust the same plot -- the four hosts used to make their own
+/// crosshair, legend and band, and no two of them made the same one.
+struct Mark
+{
+    enum class Kind
+    {
+        Segment,
+        Box,
+        Circle,
+        Text,
+    };
+
+    /// What a mark is part of, for a host that paints only some of it: one
+    /// whose axes are its own -- matplotlib's -- paints the overlay and draws
+    /// the frame its own way.
+    enum class Layer
+    {
+        /// The rules across the pane, under the lines.
+        Grid,
+        /// The axes, their numbers and names, the title and the legend.
+        Frame,
+        /// What answers the reader: the crosshair and its reading, the band,
+        /// and why the pane cannot draw.
+        Overlay,
+    };
+
+    Kind kind = Kind::Segment;
+    Layer layer = Layer::Frame;
+    /// Painted only inside the pane (Scene::area).
+    bool clipped = false;
+    /// A segment's two ends; a box's top left and bottom right; a circle's
+    /// centre, in `from`.
+    Point from;
+    Point to;
+    /// The inside of a box or a circle. Not painted where it is clear.
+    Rgba fill = Rgba::of(0.0, 0.0, 0.0, 0.0);
+    /// A segment, and the edge of a box or a circle. Not painted at a width
+    /// of 0.
+    Rgba stroke;
+    double width = 0.0;
+    /// A circle's radius, and the radius a box's corners are rounded to.
+    double radius = 0.0;
+    /// The edge in dashes rather than whole.
+    bool dashed = false;
+    TextItem text;
 };
 
 /// One line, as it is drawn.
@@ -281,14 +333,15 @@ struct Scene
     /// the legend's border, the crosshair -- so a host paints the frame in
     /// the scope it was laid out for without working it out again.
     Chrome chrome;
-    /// The pane inside the gutters, where the lines are.
+    /// The pane inside the gutters, where the lines are -- clipped to it.
     PaneRect area;
+    /// What is painted under the lines, in order: the grid.
+    std::vector<Mark> under;
     std::vector<DrawnLine> lines;
-    /// The grid, under the lines.
-    std::vector<Segment> rules;
-    /// The axes, their ticks, and the crosshair, over them.
-    std::vector<Segment> strokes;
-    std::vector<TextItem> texts;
+    /// What is painted over them, in order: everything else.
+    std::vector<Mark> over;
+    /// The legend's rows and where they were laid out, for a host or a test
+    /// that asks which line is which; `over` paints them.
     std::vector<LegendEntry> legend;
     PaneRect legendRect;
     Reading reading;
@@ -298,6 +351,12 @@ struct Scene
     std::string message;
     Span x;
     Span y;
+
+    /// The texts painted over the lines, in order: what a test reads the
+    /// numbers off.
+    [[nodiscard]] std::vector<TextItem> texts() const;
+    /// The marks of one kind over the lines -- or under them -- in order.
+    [[nodiscard]] std::vector<Mark> marks(Mark::Kind kind, bool underLines = false) const;
 };
 
 /// Which forms of the lines a scene carries. Each is the whole of every line
@@ -462,6 +521,9 @@ private:
     [[nodiscard]] Layout layout() const;
     [[nodiscard]] PlotView paneView(const Layout& layout) const;
     [[nodiscard]] Scene compose(const SceneRequest& request);
+    /// `text` broken into lines no wider than `width` in `role`'s face.
+    [[nodiscard]] std::vector<std::string> wrapped(const std::string& text, double width,
+                                                   TextRole role) const;
     void scaleLine(int line, double py, double factor);
     void shiftLine(int line, double dy);
     void ensureLine(int line);

@@ -25,7 +25,7 @@ def figure_of(*lines, width=800, height=500):
 
 
 def test_the_library_is_the_one_this_package_speaks_to():
-    assert plotcore.abi_version() == 1
+    assert plotcore.abi_version() == 2
     assert plotcore.version() == "0.1.0"
     assert plotcore.palette_names() == ["okabe-ito", "tol bright", "tol muted", "spectrum", "safe"]
     assert plotcore.ramp_names()[1] == "viridis"
@@ -194,6 +194,6 @@ def test_a_scene_outlives_its_figure_and_holds_numpy():
     line = scene.lines[0]
     assert line.runs[0].shape[1] == 2 and line.runs[0].dtype == np.float64
     assert line.triangles.shape[0] % 3 == 0
-    assert scene.rules.dtype.names[:4] == ("x0", "y0", "x1", "y1")
+    assert scene.rules and all(rule.layer == plotcore.Layer.GRID for rule in scene.rules)
     assert any(text.text == "0" for text in scene.texts)
     assert scene.chrome.ink[:3] == (1.0, 1.0, 1.0)

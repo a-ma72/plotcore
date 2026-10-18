@@ -23,7 +23,7 @@ let sine: Vec<f64> = (0..1_000_000).map(|i| (i as f64 / 1000.0).sin()).collect()
 figure.add_line(&sine, "sine").unwrap();
 figure.set_size(800.0, 500.0, 1.0).unwrap();
 figure.wheel(400.0, 250.0, 360.0, plotcore::Modifiers::NONE).unwrap(); // three notches in
-let scene = figure.scene().unwrap(); // strokes, rules and text, in pixels
+let scene = figure.scene().unwrap(); // the lines and what to paint around them
 ```
 
 ## The crates

@@ -10,7 +10,7 @@
     0
     >>> figure.set_size(800, 500)
     >>> figure.wheel(400, 250, 360)          # three notches in, about the pointer
-    >>> scene = figure.scene()               # strokes, rules and text to paint
+    >>> scene = figure.scene()               # the lines, and the marks to paint
 
 A line is held as a pyramid of min/max envelopes, so a spike one sample wide is
 never thinned away and a zoom folds what is held rather than reading again. The
@@ -25,20 +25,42 @@ from typing import List, Optional
 
 from . import _native
 from .figure import Button, Error, Figure, Line, Modifiers
-from .scene import Align, LegendEntry, Reading, Rect, Scene, Text, TextRole
+from .scene import (
+    FORM_ALL,
+    FORM_RUNS,
+    FORM_STRIPS,
+    FORM_TRIANGLES,
+    FORM_VALUES,
+    Align,
+    Layer,
+    LegendEntry,
+    Mark,
+    MarkKind,
+    Reading,
+    Rect,
+    Scene,
+    TextRole,
+)
 
 __all__ = [
+    "FORM_ALL",
+    "FORM_RUNS",
+    "FORM_STRIPS",
+    "FORM_TRIANGLES",
+    "FORM_VALUES",
     "Align",
     "Button",
     "Error",
     "Figure",
+    "Layer",
     "LegendEntry",
     "Line",
+    "Mark",
+    "MarkKind",
     "Modifiers",
     "Reading",
     "Rect",
     "Scene",
-    "Text",
     "TextRole",
     "abi_version",
     "palette",

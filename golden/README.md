@@ -77,15 +77,21 @@ relative 1e-9, everything after a `|` character for character.
     message |TEXT
     line INDEX R G B A WIDTH RUNS POINTS TRIANGLE_POINTS MARKERS SUM_X SUM_Y
     window Y_LOW Y_HIGH Y_LOG OWN NUMBERED SUM_VALUE_X SUM_VALUE_Y
-    rules COUNT SUM_X SUM_Y
-    strokes COUNT SUM_X SUM_Y
-    text ROLE ACROSS DOWN VERTICAL X Y R G B A |TEXT
+    WHERE segments LAYER COUNT SUM_X SUM_Y SUM_WIDTH
+    WHERE box LAYER CLIPPED DASHED X0 Y0 X1 Y1 FILL_RGBA STROKE_RGBA WIDTH RADIUS
+    WHERE circle LAYER CLIPPED X Y RADIUS FILL_RGBA STROKE_RGBA WIDTH
+    WHERE text LAYER ROLE ACROSS DOWN TURN X Y R G B A |TEXT
     legend LINE R G B A X0 Y0 X1 Y1 TEXT_X TEXT_Y |NAME
     legend_rect X Y W H
     reading VALID LINE X Y PX PY |X_TEXT|Y_TEXT
     band PRESENT X Y W H
 
 A `state` command writes `state |JSON`.
+
+`WHERE` is `under`, for the marks painted under the lines, and then `over`,
+for those painted over them. The segments of each layer that has any are one
+line -- 0 the grid, 1 the frame, 2 the overlay -- and every other mark is a
+line of its own, in the order it is painted.
 
 `SUM_X` and `SUM_Y` add up every run point's coordinates (or both ends of every
 segment) in order, and `SUM_VALUE_X` and `SUM_VALUE_Y` the same points in the

@@ -129,6 +129,30 @@ TextMeasure FigureStyle::approximateMeasure() const
     return measure;
 }
 
+// --- the scene ------------------------------------------------------------------
+
+std::vector<TextItem> Scene::texts() const
+{
+    std::vector<TextItem> found;
+    for (const Mark& mark : over) {
+        if (mark.kind == Mark::Kind::Text) {
+            found.push_back(mark.text);
+        }
+    }
+    return found;
+}
+
+std::vector<Mark> Scene::marks(Mark::Kind kind, bool underLines) const
+{
+    std::vector<Mark> found;
+    for (const Mark& mark : underLines ? under : over) {
+        if (mark.kind == kind) {
+            found.push_back(mark);
+        }
+    }
+    return found;
+}
+
 // --- one line's own y ---------------------------------------------------------
 
 /// The window a line is drawn in, when it is not the common one: in the
@@ -867,6 +891,44 @@ Scene Figure::compose(const SceneRequest& request)
         scene.legend.push_back(LegendEntry{index, source().name(index), colour, {}, {}, {}});
     }
 
+    // --- what is painted, as marks -----------------------------------------------
+    const auto segment = [](Point from, Point to, Rgba colour, double width,
+                            Mark::Layer layer = Mark::Layer::Frame, bool clipped = false) {
+        Mark mark;
+        mark.kind = Mark::Kind::Segment;
+        mark.layer = layer;
+        mark.clipped = clipped;
+        mark.from = from;
+        mark.to = to;
+        mark.stroke = colour;
+        mark.width = width;
+        return mark;
+    };
+    const auto written = [&](TextItem item, Mark::Layer layer = Mark::Layer::Frame) {
+        Mark mark;
+        mark.kind = Mark::Kind::Text;
+        mark.layer = layer;
+        item.raise = s.exponentRaise;
+        mark.from = item.at;
+        mark.text = std::move(item);
+        return mark;
+    };
+    const auto boxed = [](const PaneRect& rect, Rgba fill, Rgba edge, double width,
+                          Mark::Layer layer) {
+        Mark mark;
+        mark.kind = Mark::Kind::Box;
+        mark.layer = layer;
+        mark.from = Point(rect.x, rect.y);
+        mark.to = Point(rect.x + rect.width, rect.y + rect.height);
+        mark.fill = fill;
+        mark.stroke = edge;
+        mark.width = width;
+        return mark;
+    };
+    // The ground again, a little thinner, under what is written over the pane.
+    Rgba veil = chrome.ground;
+    veil.alpha = 0.85;
+
     // --- the rules, under everything ----------------------------------------
     const PaneRect& a = lay.area;
     const auto alongX = [&](double fraction) { return a.x + fraction * a.width; };
@@ -888,30 +950,32 @@ Scene Figure::compose(const SceneRequest& request)
         const bool vertical = ofX != settings_.flipped;
         if (vertical) {
             const double at = alongX(fraction);
-            return Segment{Point(at, a.y), Point(at, a.y + a.height), colour, s.ruleWidth};
+            return segment(Point(at, a.y), Point(at, a.y + a.height), colour, s.ruleWidth,
+                           Mark::Layer::Grid);
         }
         const double at = upY(fraction);
-        return Segment{Point(a.x, at), Point(a.x + a.width, at), colour, s.ruleWidth};
+        return segment(Point(a.x, at), Point(a.x + a.width, at), colour, s.ruleWidth,
+                       Mark::Layer::Grid);
     };
     for (const Rule& rule : gridAt(settings_.grid, xGrid, lay.xTicks.values, cx.viewLow(),
                                    cx.viewHigh(), cx.logarithmic, cx.base)) {
         if (rule.at >= 0.0 && rule.at <= 1.0) {
-            scene.rules.push_back(ruleSegment(rule.at, true, rule.major));
+            scene.under.push_back(ruleSegment(rule.at, true, rule.major));
         }
     }
     for (const Rule& rule : gridAt(settings_.grid, yGrid, lay.yTicks.values, cy.viewLow(),
                                    cy.viewHigh(), cy.logarithmic, cy.base)) {
         if (rule.at >= 0.0 && rule.at <= 1.0) {
-            scene.rules.push_back(ruleSegment(rule.at, false, rule.major));
+            scene.under.push_back(ruleSegment(rule.at, false, rule.major));
         }
     }
 
     // --- the axes, their ticks and their numbers -----------------------------
     const Rgba axisColour = chrome.axisRule;
-    scene.strokes.push_back(
-        Segment{Point(a.x, a.y), Point(a.x, a.y + a.height), axisColour, s.ruleWidth});
-    scene.strokes.push_back(Segment{Point(a.x, a.y + a.height),
-                                    Point(a.x + a.width, a.y + a.height), axisColour, s.ruleWidth});
+    scene.over.push_back(
+        segment(Point(a.x, a.y), Point(a.x, a.y + a.height), axisColour, s.ruleWidth));
+    scene.over.push_back(segment(Point(a.x, a.y + a.height), Point(a.x + a.width, a.y + a.height),
+                                 axisColour, s.ruleWidth));
     const bool leftOfX = settings_.flipped;
     const auto leftFraction = [&](double value) {
         return leftOfX ? fractionOn(value, cx.viewLow(), cx.viewHigh(), cx.logarithmic, cx.base)
@@ -932,7 +996,7 @@ Scene Figure::compose(const SceneRequest& request)
         item.down = down;
         item.role = role;
         item.colour = colour;
-        scene.texts.push_back(std::move(item));
+        scene.over.push_back(written(std::move(item)));
     };
     for (std::size_t i = 0; i < lay.leftTicks.values.size(); ++i) {
         const double f = leftFraction(lay.leftTicks.values[i]);
@@ -940,8 +1004,8 @@ Scene Figure::compose(const SceneRequest& request)
             continue;
         }
         const double at = upY(f);
-        scene.strokes.push_back(
-            Segment{Point(a.x - s.tickLength, at), Point(a.x, at), axisColour, s.ruleWidth});
+        scene.over.push_back(
+            segment(Point(a.x - s.tickLength, at), Point(a.x, at), axisColour, s.ruleWidth));
         addText(lay.leftTicks.texts[i], Point(a.x - s.tickLength - s.gapXS, at),
                 TextItem::Align::End, TextItem::Align::Middle, TextRole::Tick, chrome.ink);
     }
@@ -954,8 +1018,8 @@ Scene Figure::compose(const SceneRequest& request)
             }
             const double at = alongX(f);
             const double bottom = a.y + a.height;
-            scene.strokes.push_back(Segment{Point(at, bottom), Point(at, bottom + s.tickLength),
-                                            axisColour, s.ruleWidth});
+            scene.over.push_back(segment(Point(at, bottom), Point(at, bottom + s.tickLength),
+                                         axisColour, s.ruleWidth));
             addText(lay.footTicks.texts[i], Point(at, bottom + s.gapS), TextItem::Align::Middle,
                     TextItem::Align::Start, TextRole::Tick, chrome.ink);
         }
@@ -1005,8 +1069,8 @@ Scene Figure::compose(const SceneRequest& request)
         name.down = TextItem::Align::Middle;
         name.role = TextRole::AxisName;
         name.colour = chrome.ink;
-        name.vertical = true;
-        scene.texts.push_back(std::move(name));
+        name.turn = -90.0;
+        scene.over.push_back(written(std::move(name)));
     }
     if (!footName.empty()) {
         TextItem name;
@@ -1018,7 +1082,7 @@ Scene Figure::compose(const SceneRequest& request)
         name.down = TextItem::Align::Start;
         name.role = TextRole::AxisName;
         name.colour = chrome.ink;
-        scene.texts.push_back(std::move(name));
+        scene.over.push_back(written(std::move(name)));
     }
     if (!settings_.title.empty()) {
         TextItem title;
@@ -1028,7 +1092,7 @@ Scene Figure::compose(const SceneRequest& request)
         title.down = TextItem::Align::Start;
         title.role = TextRole::Title;
         title.colour = chrome.ink;
-        scene.texts.push_back(std::move(title));
+        scene.over.push_back(written(std::move(title)));
     }
 
     // --- the axes of their own ------------------------------------------------
@@ -1037,8 +1101,8 @@ Scene Figure::compose(const SceneRequest& request)
         if (!settings_.flipped) {
             // A column: rule, tick and number right to left from the rule.
             const double rule = side.at + side.extent;
-            scene.strokes.push_back(
-                Segment{Point(rule, a.y), Point(rule, a.y + a.height), side.colour, s.accentWidth});
+            scene.over.push_back(
+                segment(Point(rule, a.y), Point(rule, a.y + a.height), side.colour, s.accentWidth));
             for (std::size_t i = 0; i < side.ticks.values.size(); ++i) {
                 const double f = fractionOn(side.ticks.values[i], side.window.low, side.window.high,
                                             side.window.logarithmic, base);
@@ -1046,8 +1110,8 @@ Scene Figure::compose(const SceneRequest& request)
                     continue;
                 }
                 const double at = upY(f);
-                scene.strokes.push_back(
-                    Segment{Point(rule - s.s3, at), Point(rule, at), side.colour, s.ruleWidth});
+                scene.over.push_back(
+                    segment(Point(rule - s.s3, at), Point(rule, at), side.colour, s.ruleWidth));
                 addText(side.ticks.texts[i], Point(rule - s.s3 - s.gapS, at), TextItem::Align::End,
                         TextItem::Align::Middle, TextRole::Tick, side.colour);
             }
@@ -1059,15 +1123,15 @@ Scene Figure::compose(const SceneRequest& request)
                 name.down = TextItem::Align::Middle;
                 name.role = TextRole::AxisName;
                 name.colour = side.colour;
-                name.vertical = true;
-                scene.texts.push_back(std::move(name));
+                name.turn = -90.0;
+                scene.over.push_back(written(std::move(name)));
             }
             continue;
         }
         // A row under the foot: rule, tick and numbers top to bottom.
         const double rule = a.y + a.height + lay.footHeight + side.at;
-        scene.strokes.push_back(
-            Segment{Point(a.x, rule), Point(a.x + a.width, rule), side.colour, s.accentWidth});
+        scene.over.push_back(
+            segment(Point(a.x, rule), Point(a.x + a.width, rule), side.colour, s.accentWidth));
         for (std::size_t i = 0; i < side.ticks.values.size(); ++i) {
             const double f = fractionOn(side.ticks.values[i], side.window.low, side.window.high,
                                         side.window.logarithmic, base);
@@ -1075,8 +1139,8 @@ Scene Figure::compose(const SceneRequest& request)
                 continue;
             }
             const double at = alongX(f);
-            scene.strokes.push_back(
-                Segment{Point(at, rule), Point(at, rule + s.s3), side.colour, s.ruleWidth});
+            scene.over.push_back(
+                segment(Point(at, rule), Point(at, rule + s.s3), side.colour, s.ruleWidth));
             addText(side.ticks.texts[i], Point(at, rule + s.accentWidth + s.s3),
                     TextItem::Align::Middle, TextItem::Align::Start, TextRole::Tick, side.colour);
         }
@@ -1089,38 +1153,8 @@ Scene Figure::compose(const SceneRequest& request)
             name.down = TextItem::Align::Start;
             name.role = TextRole::AxisName;
             name.colour = side.colour;
-            scene.texts.push_back(std::move(name));
+            scene.over.push_back(written(std::move(name)));
         }
-    }
-
-    // --- the legend ----------------------------------------------------------
-    if (settings_.legend && !scene.legend.empty()) {
-        const double swatch = s.gapL;
-        double widest = 0.0;
-        for (const LegendEntry& entry : scene.legend) {
-            widest = std::max(widest, measure_.width(entry.name, TextRole::Legend));
-        }
-        const double row = std::ceil(measure_.height(TextRole::Legend));
-        const double width = s.gapS + swatch + s.gapS + std::ceil(widest) + s.gapS;
-        const double height = s.gapS + row * static_cast<double>(scene.legend.size()) + s.gapS;
-        const bool atLeft = settings_.legendCorner == Corner::TopLeft ||
-                            settings_.legendCorner == Corner::BottomLeft;
-        const bool atTop =
-            settings_.legendCorner == Corner::TopLeft || settings_.legendCorner == Corner::TopRight;
-        scene.legendRect =
-            PaneRect{atLeft ? a.x + s.gapM : a.x + a.width - s.gapM - width,
-                     atTop ? a.y + s.gapM : a.y + a.height - s.gapM - height, width, height};
-        const PaneRect& box = scene.legendRect;
-        for (std::size_t i = 0; i < scene.legend.size(); ++i) {
-            LegendEntry& entry = scene.legend[i];
-            const double middle = box.y + s.gapS + row * static_cast<double>(i) + row / 2.0;
-            entry.from = Point(box.x + s.gapS, middle);
-            entry.to = Point(box.x + s.gapS + swatch, middle);
-            entry.textAt = Point(box.x + s.gapS + swatch + s.gapS, middle);
-        }
-    }
-    else {
-        scene.legend.clear();
     }
 
     // --- the reading under the pointer -----------------------------------------
@@ -1198,22 +1232,140 @@ Scene Figure::compose(const SceneRequest& request)
         reading.yText =
             window.own ? axisLabel(taken->y, window.low, window.high, window.logarithmic)
                        : axisLabel(taken->y, cy.viewLow(), cy.viewHigh(), lay.yTicks.logarithmic);
-        scene.strokes.push_back(Segment{Point(reading.at.x(), a.y),
-                                        Point(reading.at.x(), a.y + a.height), axisColour,
-                                        s.ruleWidth});
-        scene.strokes.push_back(Segment{Point(a.x, reading.at.y()),
-                                        Point(a.x + a.width, reading.at.y()), axisColour,
-                                        s.ruleWidth});
+        scene.over.push_back(segment(Point(reading.at.x(), a.y),
+                                     Point(reading.at.x(), a.y + a.height), axisColour, s.ruleWidth,
+                                     Mark::Layer::Overlay, true));
+        scene.over.push_back(segment(Point(a.x, reading.at.y()),
+                                     Point(a.x + a.width, reading.at.y()), axisColour, s.ruleWidth,
+                                     Mark::Layer::Overlay, true));
+        // The sample itself, so the reader can see which one was taken.
+        Mark ring;
+        ring.kind = Mark::Kind::Circle;
+        ring.layer = Mark::Layer::Overlay;
+        ring.clipped = true;
+        ring.from = reading.at;
+        ring.radius = 3.0;
+        ring.stroke = chrome.cursorInk;
+        ring.width = s.ruleWidth;
+        scene.over.push_back(ring);
     }
 
+    // --- the legend ----------------------------------------------------------
+    if (settings_.legend && !scene.legend.empty()) {
+        const double swatch = s.gapL;
+        double widest = 0.0;
+        for (const LegendEntry& entry : scene.legend) {
+            widest = std::max(widest, measure_.width(entry.name, TextRole::Legend));
+        }
+        const double row = std::ceil(measure_.height(TextRole::Legend));
+        const double width = s.gapS + swatch + s.gapS + std::ceil(widest) + s.gapS;
+        const double height = s.gapS + row * static_cast<double>(scene.legend.size()) + s.gapS;
+        const bool atLeft = settings_.legendCorner == Corner::TopLeft ||
+                            settings_.legendCorner == Corner::BottomLeft;
+        const bool atTop =
+            settings_.legendCorner == Corner::TopLeft || settings_.legendCorner == Corner::TopRight;
+        scene.legendRect =
+            PaneRect{atLeft ? a.x + s.gapM : a.x + a.width - s.gapM - width,
+                     atTop ? a.y + s.gapM : a.y + a.height - s.gapM - height, width, height};
+        const PaneRect& box = scene.legendRect;
+        for (std::size_t i = 0; i < scene.legend.size(); ++i) {
+            LegendEntry& entry = scene.legend[i];
+            const double middle = box.y + s.gapS + row * static_cast<double>(i) + row / 2.0;
+            entry.from = Point(box.x + s.gapS, middle);
+            entry.to = Point(box.x + s.gapS + swatch, middle);
+            entry.textAt = Point(box.x + s.gapS + swatch + s.gapS, middle);
+        }
+        scene.over.push_back(boxed(box, veil, chrome.axisRule, s.ruleWidth, Mark::Layer::Frame));
+        for (const LegendEntry& entry : scene.legend) {
+            scene.over.push_back(segment(entry.from, entry.to, entry.colour, 2.0 * s.lineWidth));
+            TextItem name;
+            name.text = name.base = entry.name;
+            name.at = entry.textAt;
+            name.down = TextItem::Align::Middle;
+            name.role = TextRole::Legend;
+            name.colour = chrome.ink;
+            scene.over.push_back(written(std::move(name)));
+        }
+    }
+    else {
+        scene.legend.clear();
+    }
+
+    // --- what the reading says, in the pane ------------------------------------
+    if (scene.reading.valid && settings_.readout) {
+        TextItem said;
+        said.text = said.base = "x " + scene.reading.xText + "   y " + scene.reading.yText;
+        said.at = Point(a.x + s.gapM + s.gapS, a.y + s.gapM + s.gapS);
+        said.role = TextRole::Tick;
+        said.colour = chrome.ink;
+        const PaneRect ground{a.x + s.gapM, a.y + s.gapM,
+                              measure_.width(said.text, TextRole::Tick) + 2.0 * s.gapS,
+                              measure_.height(TextRole::Tick) + 2.0 * s.gapS};
+        scene.over.push_back(boxed(ground, veil, veil, 0.0, Mark::Layer::Overlay));
+        scene.over.push_back(written(std::move(said), Mark::Layer::Overlay));
+    }
+
+    // --- the band ------------------------------------------------------------------
     if (!request.picture && drag_ == Drag::Band) {
         const double left = std::clamp(std::min(pressed_.x(), last_.x()), a.x, a.x + a.width);
         const double right = std::clamp(std::max(pressed_.x(), last_.x()), a.x, a.x + a.width);
         const double topY = std::clamp(std::min(pressed_.y(), last_.y()), a.y, a.y + a.height);
         const double bottomY = std::clamp(std::max(pressed_.y(), last_.y()), a.y, a.y + a.height);
         scene.band = PaneRect{left, topY, right - left, bottomY - topY};
+        Rgba wash = chrome.cursorInk;
+        wash.alpha = 0.12;
+        Mark band = boxed(*scene.band, wash, chrome.cursorInk, s.ruleWidth, Mark::Layer::Overlay);
+        band.dashed = true;
+        scene.over.push_back(band);
+    }
+
+    // --- why there is nothing to see ---------------------------------------------
+    if (!scene.message.empty()) {
+        const std::vector<std::string> lines =
+            wrapped(scene.message, std::max(1.0, a.width - 2.0 * s.gapL), TextRole::AxisName);
+        const double row = measure_.height(TextRole::AxisName);
+        const double top = a.y + a.height / 2.0 - row * static_cast<double>(lines.size()) / 2.0;
+        for (std::size_t i = 0; i < lines.size(); ++i) {
+            TextItem said;
+            said.text = said.base = lines[i];
+            said.at = Point(a.x + a.width / 2.0, top + row * static_cast<double>(i));
+            said.across = TextItem::Align::Middle;
+            said.role = TextRole::AxisName;
+            said.colour = chrome.ink;
+            scene.over.push_back(written(std::move(said), Mark::Layer::Overlay));
+        }
     }
     return scene;
+}
+
+std::vector<std::string> Figure::wrapped(const std::string& text, double width, TextRole role) const
+{
+    // Word by word, as a toolkit wraps a paragraph: a word that fits on the
+    // line goes on it, and one that does not starts the next.
+    std::vector<std::string> lines;
+    std::string line;
+    std::size_t at = 0;
+    while (at < text.size()) {
+        const std::size_t space = text.find(' ', at);
+        const std::size_t ends = space == std::string::npos ? text.size() : space;
+        const std::string word = text.substr(at, ends - at);
+        at = ends + (space == std::string::npos ? 0 : 1);
+        if (word.empty()) {
+            continue;
+        }
+        const std::string longer = line.empty() ? word : line + " " + word;
+        if (!line.empty() && measure_.width(longer, role) > width) {
+            lines.push_back(line);
+            line = word;
+        }
+        else {
+            line = longer;
+        }
+    }
+    if (!line.empty()) {
+        lines.push_back(line);
+    }
+    return lines;
 }
 
 // --- gestures -------------------------------------------------------------------
@@ -1477,6 +1629,7 @@ std::string Figure::state() const
         .set("minorNumbers", Value::of(settings_.minorNumbers))
         .set("markers", Value::of(settings_.markers))
         .set("cursor", Value::of(settings_.cursor))
+        .set("readout", Value::of(settings_.readout))
         .set("title", Value::of(settings_.title))
         .set("xLabel", Value::of(settings_.xLabel))
         .set("yLabel", Value::of(settings_.yLabel))
@@ -1513,6 +1666,7 @@ bool Figure::restore(const std::string& text)
     next.minorNumbers = root.boolOr("minorNumbers", next.minorNumbers);
     next.markers = root.boolOr("markers", next.markers);
     next.cursor = root.boolOr("cursor", next.cursor);
+    next.readout = root.boolOr("readout", next.readout);
     next.title = root.textOr("title", next.title);
     next.xLabel = root.textOr("xLabel", next.xLabel);
     next.yLabel = root.textOr("yLabel", next.yLabel);

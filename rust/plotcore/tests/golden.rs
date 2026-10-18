@@ -7,7 +7,7 @@
 
 use std::path::PathBuf;
 
-use plotcore::{Button, Figure, Modifiers, Rgba, Scene};
+use plotcore::{Button, Figure, Layer, Mark, MarkKind, Modifiers, Rgba, Scene};
 
 fn golden() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../golden")
@@ -87,6 +87,84 @@ fn colour(c: &Rgba) -> String {
     format!(" {} {} {} {}", g(c.red), g(c.green), g(c.blue), g(c.alpha))
 }
 
+/// The segments of each layer as a count and sums, and every other mark on a
+/// line of its own, in the order it is painted -- test_capi's marks().
+fn marks(out: &mut Vec<String>, what: &str, marks: &[Mark]) {
+    for layer in [Layer::Grid, Layer::Frame, Layer::Overlay] {
+        let segments: Vec<&Mark> =
+            marks.iter().filter(|m| m.kind == MarkKind::Segment && m.layer == layer).collect();
+        if segments.is_empty() {
+            continue;
+        }
+        let (mut sx, mut sy, mut width) = (0.0, 0.0, 0.0);
+        for m in &segments {
+            sx += m.x0;
+            sx += m.x1;
+            sy += m.y0;
+            sy += m.y1;
+            width += m.width;
+        }
+        out.push(format!(
+            "{what} segments {} {} {} {} {}",
+            layer_number(layer),
+            segments.len(),
+            g(sx),
+            g(sy),
+            g(width)
+        ));
+    }
+    for m in marks {
+        match m.kind {
+            MarkKind::Box => out.push(format!(
+                "{what} box {} {} {} {} {} {} {}{}{} {} {}",
+                layer_number(m.layer),
+                m.clipped as i32,
+                m.dashed as i32,
+                g(m.x0),
+                g(m.y0),
+                g(m.x1),
+                g(m.y1),
+                colour(&m.fill),
+                colour(&m.stroke),
+                g(m.width),
+                g(m.radius)
+            )),
+            MarkKind::Circle => out.push(format!(
+                "{what} circle {} {} {} {} {}{}{} {}",
+                layer_number(m.layer),
+                m.clipped as i32,
+                g(m.x0),
+                g(m.y0),
+                g(m.radius),
+                colour(&m.fill),
+                colour(&m.stroke),
+                g(m.width)
+            )),
+            MarkKind::Text => out.push(format!(
+                "{what} text {} {} {} {} {} {} {}{} |{}",
+                layer_number(m.layer),
+                role(m.role),
+                align(m.across),
+                align(m.down),
+                g(m.turn),
+                g(m.x0),
+                g(m.y0),
+                colour(&m.colour),
+                m.text
+            )),
+            MarkKind::Segment => {}
+        }
+    }
+}
+
+fn layer_number(layer: Layer) -> i32 {
+    match layer {
+        Layer::Grid => 0,
+        Layer::Frame => 1,
+        Layer::Overlay => 2,
+    }
+}
+
 fn digest(scene: &Scene, index: usize, out: &mut Vec<String>) {
     out.push(format!("scene {index}"));
     out.push(format!("size {} {}", g(scene.width), g(scene.height)));
@@ -133,29 +211,8 @@ fn digest(scene: &Scene, index: usize, out: &mut Vec<String>) {
             g(vy)
         ));
     }
-    for (name, segments) in [("rules", &scene.rules), ("strokes", &scene.strokes)] {
-        let (mut sx, mut sy) = (0.0, 0.0);
-        for s in segments {
-            sx += s.x0;
-            sx += s.x1;
-            sy += s.y0;
-            sy += s.y1;
-        }
-        out.push(format!("{name} {} {} {}", segments.len(), g(sx), g(sy)));
-    }
-    for t in &scene.texts {
-        out.push(format!(
-            "text {} {} {} {} {} {}{} |{}",
-            role(t.role),
-            align(t.across),
-            align(t.down),
-            t.vertical as i32,
-            g(t.x),
-            g(t.y),
-            colour(&t.colour),
-            t.text
-        ));
-    }
+    marks(out, "under", &scene.under);
+    marks(out, "over", &scene.over);
     for e in &scene.legend {
         let [a, b, c, d] = e.swatch;
         let [tx, ty] = e.text_at;

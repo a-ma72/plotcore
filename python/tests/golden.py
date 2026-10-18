@@ -17,7 +17,7 @@ from typing import List, Optional, Tuple
 import numpy as np
 
 import plotcore
-from plotcore import Button, Figure, Modifiers
+from plotcore import Button, Figure, Layer, MarkKind, Modifiers
 
 GOLDEN = Path(__file__).resolve().parents[2] / "golden"
 
@@ -73,6 +73,36 @@ def _colour(colour) -> str:
     return " " + " ".join(_g(c) for c in colour)
 
 
+def _marks(out: List[str], what: str, marks) -> None:
+    """The segments of each layer as a count and sums, and every other mark on
+    a line of its own, in the order it is painted -- test_capi's marks()."""
+    for layer in (Layer.GRID, Layer.FRAME, Layer.OVERLAY):
+        segments = [m for m in marks if m.kind == MarkKind.SEGMENT and m.layer == layer]
+        if not segments:
+            continue
+        sx = sy = width = 0.0
+        for m in segments:
+            sx += m.x0
+            sx += m.x1
+            sy += m.y0
+            sy += m.y1
+            width += m.width
+        out.append(f"{what} segments {int(layer)} {len(segments)} {_g(sx)} {_g(sy)} {_g(width)}")
+    for m in marks:
+        if m.kind == MarkKind.BOX:
+            out.append(f"{what} box {int(m.layer)} {int(m.clipped)} {int(m.dashed)}"
+                       f" {_g(m.x0)} {_g(m.y0)} {_g(m.x1)} {_g(m.y1)}" + _colour(m.fill)
+                       + _colour(m.stroke) + f" {_g(m.width)} {_g(m.radius)}")
+        elif m.kind == MarkKind.CIRCLE:
+            out.append(f"{what} circle {int(m.layer)} {int(m.clipped)} {_g(m.x0)} {_g(m.y0)}"
+                       f" {_g(m.radius)}" + _colour(m.fill) + _colour(m.stroke)
+                       + f" {_g(m.width)}")
+        elif m.kind == MarkKind.TEXT:
+            out.append(f"{what} text {int(m.layer)} {int(m.role)} {int(m.across)} {int(m.down)}"
+                       f" {_g(m.turn)} {_g(m.x0)} {_g(m.y0)}" + _colour(m.colour)
+                       + f" |{m.text}")
+
+
 def digest(scene: plotcore.Scene, index: int) -> List[str]:
     out = [f"scene {index}", f"size {_g(scene.width)} {_g(scene.height)}"]
     a = scene.area
@@ -97,17 +127,8 @@ def digest(scene: plotcore.Scene, index: int) -> List[str]:
                      f" {len(line.markers)} {_g(sx)} {_g(sy)}")
         out.append(f"window {_g(line.y_low)} {_g(line.y_high)} {int(line.y_log)} {int(line.own)}"
                    f" {int(line.numbered)} {_g(vx)} {_g(vy)}")
-    for name, segments in (("rules", scene.rules), ("strokes", scene.strokes)):
-        sx = sy = 0.0
-        for s in segments.tolist():
-            sx += s[0]
-            sx += s[2]
-            sy += s[1]
-            sy += s[3]
-        out.append(f"{name} {len(segments)} {_g(sx)} {_g(sy)}")
-    for t in scene.texts:
-        out.append(f"text {int(t.role)} {int(t.across)} {int(t.down)} {int(t.vertical)}"
-                   f" {_g(t.x)} {_g(t.y)}" + _colour(t.colour) + f" |{t.text}")
+    for what, marks in (("under", scene.under), ("over", scene.over)):
+        _marks(out, what, marks)
     for e in scene.legend:
         out.append(f"legend {e.line}" + _colour(e.colour) + " "
                    + " ".join(_g(v) for v in e.swatch + e.text_at) + f" |{e.name}")
