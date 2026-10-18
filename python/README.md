@@ -26,7 +26,7 @@ figure.add_line(np.sin(np.linspace(0, 100, 10_000_000)), "sine")
 figure.settings["title"] = "ten million samples"
 figure.set_size(800, 500)
 figure.wheel(400, 250, 360)        # three notches in, about the pointer
-scene = figure.scene()             # strokes, rules and text, in pixels
+scene = figure.scene()             # the lines and what to paint around them
 ```
 
 `plotcore.qt.PlotWidget` draws a figure in a PyQt6 widget (`pip install

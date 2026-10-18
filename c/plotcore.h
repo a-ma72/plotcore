@@ -50,7 +50,7 @@ extern "C" {
 
 /* Bumped whenever a declaration below changes meaning or layout. A binding
  * compares it with plotcore_abi_version() before it calls anything else. */
-#define PLOTCORE_ABI_VERSION 1
+#define PLOTCORE_ABI_VERSION 2
 
 typedef enum plotcore_status
 {
@@ -98,6 +98,37 @@ typedef enum plotcore_align
     PLOTCORE_ALIGN_END = 2
 } plotcore_align;
 
+/* What a mark is: see plotcore_mark. */
+typedef enum plotcore_mark_kind
+{
+    PLOTCORE_MARK_SEGMENT = 0,
+    PLOTCORE_MARK_BOX = 1,
+    PLOTCORE_MARK_CIRCLE = 2,
+    PLOTCORE_MARK_TEXT = 3
+} plotcore_mark_kind;
+
+/* What a mark is part of, for a host that paints only some of the picture: one
+ * whose axes are its own paints the overlay and draws the frame its own way. */
+typedef enum plotcore_mark_layer
+{
+    /* The rules across the pane, under the lines. */
+    PLOTCORE_LAYER_GRID = 0,
+    /* The axes, their numbers and names, the title and the legend. */
+    PLOTCORE_LAYER_FRAME = 1,
+    /* The crosshair and its reading, the band, and why the pane cannot draw. */
+    PLOTCORE_LAYER_OVERLAY = 2
+} plotcore_mark_layer;
+
+/* Which forms of a line a scene carries, or-ed together. */
+enum
+{
+    PLOTCORE_FORM_RUNS = 1,
+    PLOTCORE_FORM_TRIANGLES = 2,
+    PLOTCORE_FORM_STRIPS = 4,
+    PLOTCORE_FORM_VALUES = 8,
+    PLOTCORE_FORM_ALL = 15
+};
+
 typedef enum plotcore_appetite
 {
     PLOTCORE_APPETITE_LOW = 0,
@@ -132,16 +163,6 @@ typedef struct plotcore_rect
     double height;
 } plotcore_rect;
 
-typedef struct plotcore_segment
-{
-    double x0;
-    double y0;
-    double x1;
-    double y1;
-    plotcore_rgba colour;
-    double width;
-} plotcore_segment;
-
 /* One drawn line. Its geometry is fetched with plotcore_scene_line_points. */
 typedef struct plotcore_line_info
 {
@@ -161,25 +182,74 @@ typedef struct plotcore_line_info
     int32_t numbered;
 } plotcore_line_info;
 
-/* A piece of text. `base` is set in `role`'s face and `exponent` raised beside
- * it in PLOTCORE_TEXT_TICK_MINOR's; `text` is both in one string, with the
- * exponent in superscript digits, for a host that sets one string. `across`
- * aligns it horizontally about `x` and `down` vertically about `y`; a
- * `vertical` one is turned a quarter anticlockwise about that point. The
- * strings are UTF-8 and live as long as the scene. */
-typedef struct plotcore_text
+/* One thing to paint, in pane pixels with y down, which a host translates into
+ * its own call and decides nothing about.
+ *
+ *   SEGMENT  from (x0, y0) to (x1, y1), in `stroke` at `width`.
+ *   BOX      from its top left (x0, y0) to its bottom right (x1, y1), filled
+ *            with `fill`, edged in `stroke` at `width`, its corners rounded
+ *            to `radius`, the edge in dashes when `dashed`.
+ *   CIRCLE   about (x0, y0) at `radius`, filled with `fill` and edged in
+ *            `stroke` at `width`.
+ *   TEXT     at (x0, y0). `base` is set in `role`'s face and `exponent` raised
+ *            `raise` above it in PLOTCORE_TEXT_TICK_MINOR's; `text` is both in
+ *            one string, with the exponent in superscript digits, for a host
+ *            that sets one string. It is turned about (x0, y0) by `turn`
+ *            degrees, clockwise on the pane, and in the turned frame `across`
+ *            aligns it along and `down` across. The strings are UTF-8 and live
+ *            as long as the scene; null on a mark that is not a text.
+ *
+ * A fill with an alpha of 0 is not painted, nor an edge at a width of 0. A
+ * `clipped` mark is painted only inside the pane (plotcore_scene_area). */
+typedef struct plotcore_mark
 {
-    double x;
-    double y;
+    int32_t kind;
+    int32_t layer;
+    int32_t clipped;
+    int32_t dashed;
+    int32_t role;
     int32_t across;
     int32_t down;
-    int32_t role;
-    int32_t vertical;
+    double x0;
+    double y0;
+    double x1;
+    double y1;
+    plotcore_rgba fill;
+    plotcore_rgba stroke;
+    double width;
+    double radius;
     plotcore_rgba colour;
+    double turn;
+    double raise;
     const char* text;
     const char* base;
     const char* exponent;
-} plotcore_text;
+} plotcore_mark;
+
+/* What a scene is asked for (plotcore_scene_request_new).
+ *
+ * `forms` says which forms of a line it carries (PLOTCORE_FORM_*). A
+ * `picture` is the pane laid out again for somewhere else: at `width` by
+ * `height` pane pixels and `pixel_ratio` device pixels a pixel (zero for the
+ * pane's own), drawn from what the lines hold for the pane and asking them for
+ * nothing, with no band, and with the crosshair only on the sample a `pinned`
+ * reading names: line `reading_line`, at (`reading_x`, `reading_y`) in the
+ * data's own units. `paper` draws the light scope's picture whatever the
+ * settings say, and `transparent` leaves out the ground. */
+typedef struct plotcore_scene_request
+{
+    int32_t forms;
+    int32_t picture;
+    int32_t paper;
+    int32_t transparent;
+    int32_t pinned;
+    int32_t reading_line;
+    double width;
+    double height;
+    double pixel_ratio;
+    double reading_x;
+    double reading_y;
+} plotcore_scene_request;
 
 /* One row of the legend: a swatch from (x0, y0) to (x1, y1), and the name set
  * in PLOTCORE_TEXT_LEGEND from (text_x, text_y), centred on it vertically. */
@@ -309,8 +379,8 @@ PLOTCORE_API int64_t plotcore_held_bytes(const plotcore_figure* figure);
 /* --- settings, by the names a saved view writes ---------------------------------------- */
 /*
  * The plot as a whole:
- *   bool    xLog yLog flipped minorNumbers markers cursor legend bundle dark
- *           paper stacked colours.reversed colours.custom
+ *   bool    xLog yLog flipped minorNumbers markers cursor readout legend
+ *           bundle dark paper stacked colours.reversed colours.custom
  *   number  gridStepX gridStepY xLogBase yLogBase highlighted colours.from
  *           colours.to
  *   text    title xLabel yLabel grid ("none" "loose" "dense" "custom")
@@ -429,6 +499,9 @@ PLOTCORE_API plotcore_status plotcore_restore(plotcore_figure* figure, const cha
 
 /* A snapshot of the picture as it stands, which the caller frees. */
 PLOTCORE_API plotcore_scene* plotcore_scene_new(plotcore_figure* figure);
+/* ...or as `request` asks for it; null asks for what plotcore_scene_new does. */
+PLOTCORE_API plotcore_scene* plotcore_scene_request_new(plotcore_figure* figure,
+                                                        const plotcore_scene_request* request);
 PLOTCORE_API void plotcore_scene_free(plotcore_scene* scene);
 
 PLOTCORE_API void plotcore_scene_size(const plotcore_scene* scene, double* width, double* height);
@@ -458,18 +531,26 @@ PLOTCORE_API const double* plotcore_scene_line_run_values(const plotcore_scene* 
 /* The line as triangles, three x, y pairs each; and its marker centres. */
 PLOTCORE_API const double* plotcore_scene_line_triangles(const plotcore_scene* scene,
                                                          int64_t index);
+/* A run of the line as one triangle strip, as x, y pairs: twice the run's
+ * points, when the scene was asked for PLOTCORE_FORM_STRIPS. */
+PLOTCORE_API int64_t plotcore_scene_line_strip_length(const plotcore_scene* scene, int64_t index,
+                                                      int64_t run);
+PLOTCORE_API const double* plotcore_scene_line_strip(const plotcore_scene* scene, int64_t index,
+                                                     int64_t run);
 PLOTCORE_API const double* plotcore_scene_line_markers(const plotcore_scene* scene, int64_t index);
 
-/* The grid, under the lines; the axes, their ticks and the crosshair, over. */
-PLOTCORE_API int64_t plotcore_scene_rule_count(const plotcore_scene* scene);
-PLOTCORE_API const plotcore_segment* plotcore_scene_rules(const plotcore_scene* scene);
-PLOTCORE_API int64_t plotcore_scene_stroke_count(const plotcore_scene* scene);
-PLOTCORE_API const plotcore_segment* plotcore_scene_strokes(const plotcore_scene* scene);
+/* What is painted under the lines, and over them, each in the order it is
+ * painted: the ground first, then `under`, the lines clipped to the pane, and
+ * `over`. That is the whole picture. */
+PLOTCORE_API int64_t plotcore_scene_under_count(const plotcore_scene* scene);
+PLOTCORE_API plotcore_status plotcore_scene_under(const plotcore_scene* scene, int64_t index,
+                                                  plotcore_mark* out);
+PLOTCORE_API int64_t plotcore_scene_over_count(const plotcore_scene* scene);
+PLOTCORE_API plotcore_status plotcore_scene_over(const plotcore_scene* scene, int64_t index,
+                                                 plotcore_mark* out);
 
-PLOTCORE_API int64_t plotcore_scene_text_count(const plotcore_scene* scene);
-PLOTCORE_API plotcore_status plotcore_scene_text(const plotcore_scene* scene, int64_t index,
-                                                 plotcore_text* out);
-
+/* The legend's rows and where they were laid out, for a host that asks which
+ * line is which: plotcore_scene_over paints them. */
 PLOTCORE_API int64_t plotcore_scene_legend_count(const plotcore_scene* scene);
 PLOTCORE_API plotcore_status plotcore_scene_legend(const plotcore_scene* scene, int64_t index,
                                                    plotcore_legend_entry* out);

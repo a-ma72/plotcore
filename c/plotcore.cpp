@@ -32,13 +32,15 @@ struct plotcore_figure
 struct plotcore_scene
 {
     Scene scene;
-    std::vector<plotcore_segment> rules;
-    std::vector<plotcore_segment> strokes;
-    /// Each drawn line's runs, triangles and markers as x, y pairs.
+    /// The marks as C reads them, their strings pointing into `scene`'s own.
+    std::vector<plotcore_mark> under;
+    std::vector<plotcore_mark> over;
+    /// Each drawn line's runs, strips, triangles and markers as x, y pairs.
     struct Line
     {
         std::vector<std::vector<double>> runs;
         std::vector<std::vector<double>> values;
+        std::vector<std::vector<double>> strips;
         std::vector<double> triangles;
         std::vector<double> markers;
     };
@@ -84,10 +86,34 @@ Rgba colourOf(const plotcore_rgba& colour)
     return Rgba::of(colour.red, colour.green, colour.blue, colour.alpha);
 }
 
-plotcore_segment segmentOf(const Segment& segment)
+plotcore_mark markOf(const Mark& mark)
 {
-    return plotcore_segment{segment.from.x(), segment.from.y(),       segment.to.x(),
-                            segment.to.y(),   rgbaOf(segment.colour), segment.width};
+    plotcore_mark out{};
+    out.kind = static_cast<int32_t>(mark.kind);
+    out.layer = static_cast<int32_t>(mark.layer);
+    out.clipped = mark.clipped ? 1 : 0;
+    out.dashed = mark.dashed ? 1 : 0;
+    out.x0 = mark.from.x();
+    out.y0 = mark.from.y();
+    out.x1 = mark.to.x();
+    out.y1 = mark.to.y();
+    out.fill = rgbaOf(mark.fill);
+    out.stroke = rgbaOf(mark.stroke);
+    out.width = mark.width;
+    out.radius = mark.radius;
+    if (mark.kind == Mark::Kind::Text) {
+        const TextItem& text = mark.text;
+        out.role = static_cast<int32_t>(text.role);
+        out.across = static_cast<int32_t>(text.across);
+        out.down = static_cast<int32_t>(text.down);
+        out.colour = rgbaOf(text.colour);
+        out.turn = text.turn;
+        out.raise = text.raise;
+        out.text = text.text.c_str();
+        out.base = text.base.c_str();
+        out.exponent = text.exponent.c_str();
+    }
+    return out;
 }
 
 plotcore_rect rectOf(const PaneRect& rect)
@@ -159,7 +185,7 @@ const Field<bool FigureSettings::*> kBools[] = {
     {"markers", &FigureSettings::markers}, {"cursor", &FigureSettings::cursor},
     {"legend", &FigureSettings::legend},   {"bundle", &FigureSettings::bundle},
     {"dark", &FigureSettings::dark},       {"paper", &FigureSettings::paper},
-    {"stacked", &FigureSettings::stacked},
+    {"stacked", &FigureSettings::stacked}, {"readout", &FigureSettings::readout},
 };
 
 const Field<double FigureSettings::*> kNumbers[] = {
@@ -1207,7 +1233,9 @@ plotcore_status plotcore_restore(plotcore_figure* figure, const char* json)
 // --- one frame
 // -------------------------------------------------------------------------------------
 
-plotcore_scene* plotcore_scene_new(plotcore_figure* figure)
+namespace {
+
+plotcore_scene* snapshot(plotcore_figure* figure, const SceneRequest& request)
 {
     if (figure == nullptr) {
         lastError = "no figure";
@@ -1216,15 +1244,15 @@ plotcore_scene* plotcore_scene_new(plotcore_figure* figure)
     lastError.clear();
     try {
         auto out = std::make_unique<plotcore_scene>();
-        out->scene = figure->figure.scene();
+        out->scene = figure->figure.scene(request);
         const Scene& scene = out->scene;
-        out->rules.reserve(scene.rules.size());
-        for (const Segment& segment : scene.rules) {
-            out->rules.push_back(segmentOf(segment));
+        out->under.reserve(scene.under.size());
+        for (const Mark& mark : scene.under) {
+            out->under.push_back(markOf(mark));
         }
-        out->strokes.reserve(scene.strokes.size());
-        for (const Segment& segment : scene.strokes) {
-            out->strokes.push_back(segmentOf(segment));
+        out->over.reserve(scene.over.size());
+        for (const Mark& mark : scene.over) {
+            out->over.push_back(markOf(mark));
         }
         const auto flat = [](const std::vector<Point>& points) {
             std::vector<double> xy;
@@ -1245,6 +1273,9 @@ plotcore_scene* plotcore_scene_new(plotcore_figure* figure)
             for (const std::vector<Point>& run : line.values) {
                 flattened.values.push_back(flat(run));
             }
+            for (const std::vector<Point>& strip : line.strips) {
+                flattened.strips.push_back(flat(strip));
+            }
             flattened.triangles = flat(line.triangles);
             flattened.markers = flat(line.markers);
             out->lines.push_back(std::move(flattened));
@@ -1258,6 +1289,36 @@ plotcore_scene* plotcore_scene_new(plotcore_figure* figure)
         lastError = "unknown failure";
     }
     return nullptr;
+}
+
+} // namespace
+
+plotcore_scene* plotcore_scene_new(plotcore_figure* figure)
+{
+    return snapshot(figure, SceneRequest{});
+}
+
+plotcore_scene* plotcore_scene_request_new(plotcore_figure* figure,
+                                           const plotcore_scene_request* request)
+{
+    if (request == nullptr) {
+        return snapshot(figure, SceneRequest{});
+    }
+    SceneRequest asked;
+    asked.geometry.runs = (request->forms & PLOTCORE_FORM_RUNS) != 0;
+    asked.geometry.triangles = (request->forms & PLOTCORE_FORM_TRIANGLES) != 0;
+    asked.geometry.strips = (request->forms & PLOTCORE_FORM_STRIPS) != 0;
+    asked.geometry.values = (request->forms & PLOTCORE_FORM_VALUES) != 0;
+    asked.picture = request->picture != 0;
+    asked.width = request->width;
+    asked.height = request->height;
+    asked.pixelRatio = request->pixel_ratio;
+    asked.paper = request->paper != 0;
+    asked.transparent = request->transparent != 0;
+    if (request->pinned != 0) {
+        asked.reading = PinnedSample{request->reading_line, request->reading_x, request->reading_y};
+    }
+    return snapshot(figure, asked);
 }
 
 void plotcore_scene_free(plotcore_scene* scene)
@@ -1345,7 +1406,8 @@ plotcore_status plotcore_scene_line(const plotcore_scene* scene, int64_t index,
     out->colour = rgbaOf(line.colour);
     out->width = line.width;
     out->marker_radius = line.markerRadius;
-    out->run_count = static_cast<int64_t>(line.runs.size());
+    out->run_count =
+        static_cast<int64_t>(std::max({line.runs.size(), line.strips.size(), line.values.size()}));
     out->triangle_points = static_cast<int64_t>(line.triangles.size());
     out->marker_count = static_cast<int64_t>(line.markers.size());
     out->y_low = line.y.low;
@@ -1390,6 +1452,28 @@ const double* plotcore_scene_line_run_values(const plotcore_scene* scene, int64_
                : nullptr;
 }
 
+int64_t plotcore_scene_line_strip_length(const plotcore_scene* scene, int64_t index, int64_t run)
+{
+    if (!hasDrawn(scene, index)) {
+        return 0;
+    }
+    const auto& strips = scene->lines[static_cast<std::size_t>(index)].strips;
+    return run >= 0 && static_cast<std::size_t>(run) < strips.size()
+               ? static_cast<int64_t>(strips[static_cast<std::size_t>(run)].size() / 2)
+               : 0;
+}
+
+const double* plotcore_scene_line_strip(const plotcore_scene* scene, int64_t index, int64_t run)
+{
+    if (!hasDrawn(scene, index)) {
+        return nullptr;
+    }
+    const auto& strips = scene->lines[static_cast<std::size_t>(index)].strips;
+    return run >= 0 && static_cast<std::size_t>(run) < strips.size()
+               ? strips[static_cast<std::size_t>(run)].data()
+               : nullptr;
+}
+
 const double* plotcore_scene_line_triangles(const plotcore_scene* scene, int64_t index)
 {
     return hasDrawn(scene, index) ? scene->lines[static_cast<std::size_t>(index)].triangles.data()
@@ -1402,48 +1486,33 @@ const double* plotcore_scene_line_markers(const plotcore_scene* scene, int64_t i
                                   : nullptr;
 }
 
-int64_t plotcore_scene_rule_count(const plotcore_scene* scene)
+int64_t plotcore_scene_under_count(const plotcore_scene* scene)
 {
-    return scene != nullptr ? static_cast<int64_t>(scene->rules.size()) : 0;
+    return scene != nullptr ? static_cast<int64_t>(scene->under.size()) : 0;
 }
 
-const plotcore_segment* plotcore_scene_rules(const plotcore_scene* scene)
-{
-    return scene != nullptr ? scene->rules.data() : nullptr;
-}
-
-int64_t plotcore_scene_stroke_count(const plotcore_scene* scene)
-{
-    return scene != nullptr ? static_cast<int64_t>(scene->strokes.size()) : 0;
-}
-
-const plotcore_segment* plotcore_scene_strokes(const plotcore_scene* scene)
-{
-    return scene != nullptr ? scene->strokes.data() : nullptr;
-}
-
-int64_t plotcore_scene_text_count(const plotcore_scene* scene)
-{
-    return scene != nullptr ? static_cast<int64_t>(scene->scene.texts.size()) : 0;
-}
-
-plotcore_status plotcore_scene_text(const plotcore_scene* scene, int64_t index, plotcore_text* out)
+plotcore_status plotcore_scene_under(const plotcore_scene* scene, int64_t index, plotcore_mark* out)
 {
     if (scene == nullptr || out == nullptr || index < 0 ||
-        static_cast<std::size_t>(index) >= scene->scene.texts.size()) {
-        return fail(PLOTCORE_ERROR_RANGE, "no text " + std::to_string(index));
+        static_cast<std::size_t>(index) >= scene->under.size()) {
+        return fail(PLOTCORE_ERROR_RANGE, "no mark " + std::to_string(index) + " under the lines");
     }
-    const TextItem& text = scene->scene.texts[static_cast<std::size_t>(index)];
-    out->x = text.at.x();
-    out->y = text.at.y();
-    out->across = static_cast<int32_t>(text.across);
-    out->down = static_cast<int32_t>(text.down);
-    out->role = static_cast<int32_t>(text.role);
-    out->vertical = text.vertical ? 1 : 0;
-    out->colour = rgbaOf(text.colour);
-    out->text = text.text.c_str();
-    out->base = text.base.c_str();
-    out->exponent = text.exponent.c_str();
+    *out = scene->under[static_cast<std::size_t>(index)];
+    return PLOTCORE_OK;
+}
+
+int64_t plotcore_scene_over_count(const plotcore_scene* scene)
+{
+    return scene != nullptr ? static_cast<int64_t>(scene->over.size()) : 0;
+}
+
+plotcore_status plotcore_scene_over(const plotcore_scene* scene, int64_t index, plotcore_mark* out)
+{
+    if (scene == nullptr || out == nullptr || index < 0 ||
+        static_cast<std::size_t>(index) >= scene->over.size()) {
+        return fail(PLOTCORE_ERROR_RANGE, "no mark " + std::to_string(index) + " over the lines");
+    }
+    *out = scene->over[static_cast<std::size_t>(index)];
     return PLOTCORE_OK;
 }
 

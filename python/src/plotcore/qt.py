@@ -32,7 +32,7 @@ except ImportError as error:  # pragma: no cover -- said once, plainly
     raise ImportError("plotcore.qt needs PyQt6: pip install plotcore[qt]") from error
 
 from .figure import Button, Figure, Modifiers
-from .scene import Align, Scene, Text, TextRole
+from .scene import Align, Mark, MarkKind, Scene, TextRole
 
 def _qcolor(colour) -> QColor:
     return QColor.fromRgbF(*(float(c) for c in colour))
@@ -137,17 +137,16 @@ class PlotWidget(QWidget):
         image = QImage(round(width * scale), round(height * scale),
                        QImage.Format.Format_ARGB32_Premultiplied)
         image.setDevicePixelRatio(scale)
-        self.figure.set_size(width, height, scale)
-        scene = self.figure.scene()
+        image.fill(Qt.GlobalColor.transparent)
+        scene = self.figure.scene(picture=(width, height), pixel_ratio=scale)
         painter = QPainter(image)
         try:
             self.paint_scene(painter, scene)
         finally:
             painter.end()
-        self.figure.set_size(self.width(), self.height(), self.devicePixelRatioF())
         return image
 
-    def _draw_text(self, painter: QPainter, text: Text) -> None:
+    def _draw_text(self, painter: QPainter, text: Mark) -> None:
         font = self.role_font(text.role)
         raised = self.role_font(TextRole.TICK_MINOR)
         metrics = self._font_metrics(text.role)
@@ -162,9 +161,8 @@ class PlotWidget(QWidget):
             return {Align.START: 0.0, Align.MIDDLE: -extent / 2.0, Align.END: -extent}[align]
 
         painter.save()
-        painter.translate(QPointF(text.x, text.y))
-        if text.vertical:
-            painter.rotate(-90.0)
+        painter.translate(QPointF(text.x0, text.y0))
+        painter.rotate(text.turn)
         left = offset(text.across, width)
         top = offset(text.down, height)
         painter.setPen(_qcolor(text.colour))
@@ -172,30 +170,54 @@ class PlotWidget(QWidget):
         painter.drawText(QPointF(left, top + metrics.ascent()), base)
         if text.exponent:
             painter.setFont(raised)
-            painter.drawText(
-                QPointF(left + base_width,
-                        top + metrics.ascent() - self.figure.style["exponentRaise"]),
-                text.exponent)
+            painter.drawText(QPointF(left + base_width, top + metrics.ascent() - text.rise),
+                             text.exponent)
+        painter.restore()
+
+    def _paint_mark(self, painter: QPainter, mark: Mark, area: QRectF) -> None:
+        painter.save()
+        if mark.clipped:
+            painter.setClipRect(area)
+        if mark.kind == MarkKind.TEXT:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            self._draw_text(painter, mark)
+            painter.restore()
+            return
+        if mark.width > 0.0:
+            pen = QPen(_qcolor(mark.stroke), mark.width)
+            pen.setCapStyle(Qt.PenCapStyle.FlatCap)
+            if mark.dashed:
+                pen.setStyle(Qt.PenStyle.DashLine)
+            painter.setPen(pen)
+        else:
+            painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(_qcolor(mark.fill) if mark.fill[3] > 0.0 else Qt.BrushStyle.NoBrush)
+        if mark.kind == MarkKind.SEGMENT:
+            # Crisp rather than smeared over two rows.
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+            painter.drawLine(QPointF(mark.x0, mark.y0), QPointF(mark.x1, mark.y1))
+        elif mark.kind == MarkKind.BOX:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, mark.radius > 0.0)
+            box = QRectF(QPointF(mark.x0, mark.y0), QPointF(mark.x1, mark.y1))
+            if mark.radius > 0.0:
+                painter.drawRoundedRect(box, mark.radius, mark.radius)
+            else:
+                painter.drawRect(box)
+        elif mark.kind == MarkKind.CIRCLE:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            painter.drawEllipse(QPointF(mark.x0, mark.y0), mark.radius, mark.radius)
         painter.restore()
 
     def paint_scene(self, painter: QPainter, scene: Scene) -> None:
         """Paint `scene`: all a host other than this widget needs to draw a
-        figure with QPainter."""
-        style = self.figure.style
+        figure with QPainter. Every colour, width and place is the scene's."""
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.fillRect(QRectF(0, 0, scene.width, scene.height), _qcolor(scene.ground))
-
-        def stroke(segments) -> None:
-            for s in segments:
-                pen = QPen(_qcolor((s["red"], s["green"], s["blue"], s["alpha"])), float(s["width"]))
-                pen.setCapStyle(Qt.PenCapStyle.FlatCap)
-                painter.setPen(pen)
-                painter.drawLine(QPointF(s["x0"], s["y0"]), QPointF(s["x1"], s["y1"]))
-
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-        stroke(scene.rules)
-
+        if scene.ground[3] > 0.0:
+            painter.fillRect(QRectF(0, 0, scene.width, scene.height), _qcolor(scene.ground))
         area = QRectF(scene.area.x, scene.area.y, scene.area.width, scene.area.height)
+        for mark in scene.under:
+            self._paint_mark(painter, mark, area)
+
         painter.save()
         painter.setClipRect(area)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
@@ -218,64 +240,8 @@ class PlotWidget(QWidget):
                 painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.restore()
 
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-        stroke(scene.strokes)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        for text in scene.texts:
-            self._draw_text(painter, text)
-
-        chrome = scene.chrome
-        ink = chrome.ink
-        if scene.legend and scene.legend_rect is not None:
-            box = scene.legend_rect
-            ground = _qcolor(scene.ground)
-            ground.setAlphaF(0.85)
-            painter.setPen(QPen(_qcolor(chrome.axis_rule), style["ruleWidth"]))
-            painter.setBrush(ground)
-            painter.drawRect(QRectF(box.x, box.y, box.width, box.height))
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            for entry in scene.legend:
-                painter.setPen(QPen(_qcolor(entry.colour), 2.0 * style["lineWidth"]))
-                x0, y0, x1, y1 = entry.swatch
-                painter.drawLine(QPointF(x0, y0), QPointF(x1, y1))
-                self._draw_text(painter, Text(entry.text_at[0], entry.text_at[1], Align.START,
-                                              Align.MIDDLE, TextRole.LEGEND, False, ink,
-                                              entry.name, entry.name, ""))
-
-        reading = scene.reading
-        if reading.valid:
-            painter.setPen(QPen(_qcolor(chrome.cursor_ink), style["ruleWidth"]))
-            painter.drawEllipse(QPointF(reading.px, reading.py), 3.0, 3.0)
-            font = self.role_font(TextRole.TICK)
-            metrics = self._font_metrics(TextRole.TICK)
-            readout = f"x {reading.x_text}   y {reading.y_text}"
-            gap = style["gapS"]
-            box = QRectF(area.x() + style["gapM"], area.y() + style["gapM"],
-                         metrics.horizontalAdvance(readout) + 2 * gap, metrics.height() + 2 * gap)
-            ground = _qcolor(scene.ground)
-            ground.setAlphaF(0.85)
-            painter.fillRect(box, ground)
-            painter.setFont(font)
-            painter.setPen(_qcolor(ink))
-            painter.drawText(QPointF(box.x() + gap, box.y() + gap + metrics.ascent()), readout)
-
-        if scene.band is not None:
-            band = scene.band
-            fill = _qcolor(chrome.cursor_ink)
-            fill.setAlphaF(0.12)
-            painter.setPen(QPen(_qcolor(chrome.cursor_ink), style["ruleWidth"],
-                                Qt.PenStyle.DashLine))
-            painter.setBrush(fill)
-            painter.drawRect(QRectF(band.x, band.y, band.width, band.height))
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-
-        if scene.message:
-            painter.setFont(self.role_font(TextRole.AXIS_NAME))
-            painter.setPen(_qcolor(ink))
-            gap = style["gapL"]
-            painter.drawText(area.adjusted(gap, gap, -gap, -gap),
-                             int(Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap),
-                             scene.message)
+        for mark in scene.over:
+            self._paint_mark(painter, mark, area)
 
     # --- events ---------------------------------------------------------------
 

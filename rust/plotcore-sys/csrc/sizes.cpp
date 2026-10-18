@@ -18,11 +18,11 @@ extern "C" std::size_t plotcore_sys_size_of(int which)
     case 2:
         return sizeof(plotcore_rect);
     case 3:
-        return sizeof(plotcore_segment);
+        return sizeof(plotcore_mark);
     case 4:
         return sizeof(plotcore_line_info);
     case 5:
-        return sizeof(plotcore_text);
+        return sizeof(plotcore_scene_request);
     case 6:
         return sizeof(plotcore_legend_entry);
     case 7:

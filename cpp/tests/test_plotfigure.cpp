@@ -291,7 +291,7 @@ TEST_CASE("a figure draws its lines inside the pane, numbered on both axes", "[f
 
     int left = 0;
     int foot = 0;
-    for (const TextItem& text : scene.texts) {
+    for (const TextItem& text : scene.texts()) {
         if (text.at.x() < a.x) {
             ++left;
         }
@@ -301,7 +301,7 @@ TEST_CASE("a figure draws its lines inside the pane, numbered on both axes", "[f
     }
     REQUIRE(left >= 3);
     REQUIRE(foot >= 3);
-    REQUIRE_FALSE(scene.rules.empty());
+    REQUIRE_FALSE(scene.under.empty());
 }
 
 TEST_CASE("the wheel holds the value under the pointer and a double click puts it back", "[figure]")
@@ -505,8 +505,8 @@ TEST_CASE("an axis of its own waits for a second line", "[figure]")
     REQUIRE(run.front().y() > beside.area.y + 0.5 * beside.area.height);
     REQUIRE(run.back().y() < beside.area.y + 0.5 * beside.area.height);
     bool named = false;
-    for (const TextItem& text : beside.texts) {
-        named = named || (text.text == "volts" && text.vertical);
+    for (const TextItem& text : beside.texts()) {
+        named = named || (text.text == "volts" && text.turn == -90.0);
     }
     REQUIRE(named);
 }
@@ -672,9 +672,11 @@ TEST_CASE("a view written down reads back as the same picture", "[figure]")
     REQUIRE(again.settings().legendCorner == Corner::BottomLeft);
     REQUIRE(again.lineSettings(1).axisLabel == "volts");
     REQUIRE(again.lineSettings(1).colour.has_value());
-    REQUIRE(restored.texts.size() == zoomed.texts.size());
-    for (std::size_t i = 0; i < restored.texts.size(); ++i) {
-        REQUIRE(restored.texts[i].text == zoomed.texts[i].text);
+    const std::vector<TextItem> restoredTexts = restored.texts();
+    const std::vector<TextItem> zoomedTexts = zoomed.texts();
+    REQUIRE(restoredTexts.size() == zoomedTexts.size());
+    for (std::size_t i = 0; i < restoredTexts.size(); ++i) {
+        REQUIRE(restoredTexts[i].text == zoomedTexts[i].text);
     }
     REQUIRE(restored.lines.size() == zoomed.lines.size());
     for (std::size_t i = 0; i < restored.lines.size(); ++i) {
@@ -926,7 +928,7 @@ TEST_CASE("a figure draws a host's lines as it draws its own", "[figure][source]
         REQUIRE(a.lines[i].runs == b.lines[i].runs);
         REQUIRE(a.lines[i].colour == b.lines[i].colour);
     }
-    REQUIRE(a.texts.size() == b.texts.size());
+    REQUIRE(a.texts().size() == b.texts().size());
 
     // A line is coloured by the series it is, not by where it is drawn: the
     // host that left a line out before it hands over its series too.
@@ -1101,4 +1103,76 @@ TEST_CASE("a picture is the pane laid out again, and asks the lines for nothing"
             Approx((hovered.reading.at.x() - hovered.area.x) / hovered.area.width));
     REQUIRE((pinned.reading.at.y() - pinned.area.y) / pinned.area.height ==
             Approx((hovered.reading.at.y() - hovered.area.y) / hovered.area.height));
+}
+
+TEST_CASE("the crosshair, the legend, the band and the message are marks a host only paints",
+          "[figure]")
+{
+    const std::vector<double> values = ramp(300, 10.0, 0.5);
+    Figure figure = figureOf({values});
+    FigureSettings settings = figure.settings();
+    settings.legend = true;
+    figure.setSettings(settings);
+    const Scene first = figure.scene();
+    const auto boxes = first.marks(Mark::Kind::Box);
+    REQUIRE(boxes.size() == 1); // the legend's
+    REQUIRE(boxes.front().layer == Mark::Layer::Frame);
+    REQUIRE(boxes.front().from.x() == first.legendRect.x);
+
+    // Pointing reads a sample: rules through it and a ring round it, clipped
+    // to the pane, and the reading written in a box in the corner.
+    const Point at = sampleAt(first, 0, 120);
+    figure.hover(at.x(), at.y());
+    const Scene read = figure.scene();
+    const auto rings = read.marks(Mark::Kind::Circle);
+    REQUIRE(rings.size() == 1);
+    REQUIRE(rings.front().clipped);
+    REQUIRE(rings.front().layer == Mark::Layer::Overlay);
+    REQUIRE(rings.front().from.x() == Approx(read.reading.at.x()));
+    bool written = false;
+    for (const TextItem& text : read.texts()) {
+        written = written || text.text == "x " + read.reading.xText + "   y " + read.reading.yText;
+    }
+    REQUIRE(written);
+
+    // ...unless the host writes it somewhere of its own.
+    settings = figure.settings();
+    settings.readout = false;
+    figure.setSettings(settings);
+    const Scene quiet = figure.scene();
+    REQUIRE(quiet.reading.valid);
+    REQUIRE(quiet.marks(Mark::Kind::Box).size() == 1);
+    REQUIRE(quiet.texts().size() == read.texts().size() - 1);
+
+    // A band is a box, dashed, over everything but the message.
+    figure.press(at.x(), at.y(), Button::Right, {});
+    figure.move(at.x() + 100.0, at.y() + 60.0, {});
+    const Scene banding = figure.scene();
+    const auto band = banding.marks(Mark::Kind::Box).back();
+    REQUIRE(band.dashed);
+    REQUIRE(band.layer == Mark::Layer::Overlay);
+    REQUIRE(band.to.x() - band.from.x() == Approx(banding.band->width));
+    figure.release(at.x() + 100.0, at.y() + 60.0, Button::Right, {});
+
+    // A pane that cannot draw says why, broken into lines that fit it.
+    std::vector<double> negative(100, -1.0);
+    Figure empty = figureOf({negative}, 300.0, 400.0);
+    FigureSettings logarithmic = empty.settings();
+    logarithmic.yLog = true;
+    empty.setSettings(logarithmic);
+    const Scene said = empty.scene();
+    REQUIRE_FALSE(said.message.empty());
+    std::string joined;
+    int lines = 0;
+    for (const TextItem& text : said.texts()) {
+        if (text.role != TextRole::AxisName) {
+            continue;
+        }
+        joined += (joined.empty() ? "" : " ") + text.text;
+        ++lines;
+        REQUIRE(FigureStyle{}.approximateMeasure().width(text.text, TextRole::AxisName) <=
+                said.area.width);
+    }
+    REQUIRE(lines > 1);
+    REQUIRE(joined == said.message);
 }

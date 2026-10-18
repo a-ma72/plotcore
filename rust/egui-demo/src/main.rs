@@ -731,7 +731,10 @@ mod self_test {
             walk.app.view.figure.set_text("grid", grid).unwrap();
             walk.app.view.figure.set_number("gridStepX", 100_000.0).unwrap();
             let ruled = walk.frame(vec![]);
-            walk.check((grid == "none") == ruled.rules.is_empty(), &format!("the {grid} grid"));
+            walk.check(
+                (grid == "none") == ruled.rules().next().is_none(),
+                &format!("the {grid} grid"),
+            );
         }
         let figure = &mut walk.app.view.figure;
         figure.set_text("grid", "loose").unwrap();

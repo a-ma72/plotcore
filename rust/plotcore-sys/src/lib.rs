@@ -14,7 +14,7 @@
 
 use std::ffi::{c_char, c_double, c_int, c_void};
 
-pub const PLOTCORE_ABI_VERSION: i32 = 1;
+pub const PLOTCORE_ABI_VERSION: i32 = 2;
 
 pub type plotcore_status = c_int;
 pub const PLOTCORE_OK: plotcore_status = 0;
@@ -41,6 +41,21 @@ pub const PLOTCORE_TEXT_LEGEND: i32 = 4;
 pub const PLOTCORE_ALIGN_START: i32 = 0;
 pub const PLOTCORE_ALIGN_MIDDLE: i32 = 1;
 pub const PLOTCORE_ALIGN_END: i32 = 2;
+
+pub const PLOTCORE_MARK_SEGMENT: i32 = 0;
+pub const PLOTCORE_MARK_BOX: i32 = 1;
+pub const PLOTCORE_MARK_CIRCLE: i32 = 2;
+pub const PLOTCORE_MARK_TEXT: i32 = 3;
+
+pub const PLOTCORE_LAYER_GRID: i32 = 0;
+pub const PLOTCORE_LAYER_FRAME: i32 = 1;
+pub const PLOTCORE_LAYER_OVERLAY: i32 = 2;
+
+pub const PLOTCORE_FORM_RUNS: i32 = 1;
+pub const PLOTCORE_FORM_TRIANGLES: i32 = 2;
+pub const PLOTCORE_FORM_STRIPS: i32 = 4;
+pub const PLOTCORE_FORM_VALUES: i32 = 8;
+pub const PLOTCORE_FORM_ALL: i32 = 15;
 
 pub type plotcore_appetite = c_int;
 pub const PLOTCORE_APPETITE_LOW: plotcore_appetite = 0;
@@ -78,17 +93,6 @@ pub struct plotcore_rect {
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct plotcore_segment {
-    pub x0: c_double,
-    pub y0: c_double,
-    pub x1: c_double,
-    pub y1: c_double,
-    pub colour: plotcore_rgba,
-    pub width: c_double,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct plotcore_line_info {
     pub line: i32,
     pub colour: plotcore_rgba,
@@ -106,17 +110,72 @@ pub struct plotcore_line_info {
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
-pub struct plotcore_text {
-    pub x: c_double,
-    pub y: c_double,
+pub struct plotcore_mark {
+    pub kind: i32,
+    pub layer: i32,
+    pub clipped: i32,
+    pub dashed: i32,
+    pub role: i32,
     pub across: i32,
     pub down: i32,
-    pub role: i32,
-    pub vertical: i32,
+    pub x0: c_double,
+    pub y0: c_double,
+    pub x1: c_double,
+    pub y1: c_double,
+    pub fill: plotcore_rgba,
+    pub stroke: plotcore_rgba,
+    pub width: c_double,
+    pub radius: c_double,
     pub colour: plotcore_rgba,
+    pub turn: c_double,
+    pub raise: c_double,
     pub text: *const c_char,
     pub base: *const c_char,
     pub exponent: *const c_char,
+}
+
+impl Default for plotcore_mark {
+    fn default() -> Self {
+        Self {
+            kind: 0,
+            layer: 0,
+            clipped: 0,
+            dashed: 0,
+            role: 0,
+            across: 0,
+            down: 0,
+            x0: 0.0,
+            y0: 0.0,
+            x1: 0.0,
+            y1: 0.0,
+            fill: plotcore_rgba::default(),
+            stroke: plotcore_rgba::default(),
+            width: 0.0,
+            radius: 0.0,
+            colour: plotcore_rgba::default(),
+            turn: 0.0,
+            raise: 0.0,
+            text: std::ptr::null(),
+            base: std::ptr::null(),
+            exponent: std::ptr::null(),
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct plotcore_scene_request {
+    pub forms: i32,
+    pub picture: i32,
+    pub paper: i32,
+    pub transparent: i32,
+    pub pinned: i32,
+    pub reading_line: i32,
+    pub width: c_double,
+    pub height: c_double,
+    pub pixel_ratio: c_double,
+    pub reading_x: c_double,
+    pub reading_y: c_double,
 }
 
 #[repr(C)]
@@ -452,6 +511,10 @@ unsafe extern "C" {
 
     // --- one frame
     pub fn plotcore_scene_new(figure: *mut plotcore_figure) -> *mut plotcore_scene;
+    pub fn plotcore_scene_request_new(
+        figure: *mut plotcore_figure,
+        request: *const plotcore_scene_request,
+    ) -> *mut plotcore_scene;
     pub fn plotcore_scene_free(scene: *mut plotcore_scene);
     pub fn plotcore_scene_size(
         scene: *const plotcore_scene,
@@ -496,15 +559,27 @@ unsafe extern "C" {
     ) -> *const c_double;
     pub fn plotcore_scene_line_markers(scene: *const plotcore_scene, index: i64)
         -> *const c_double;
-    pub fn plotcore_scene_rule_count(scene: *const plotcore_scene) -> i64;
-    pub fn plotcore_scene_rules(scene: *const plotcore_scene) -> *const plotcore_segment;
-    pub fn plotcore_scene_stroke_count(scene: *const plotcore_scene) -> i64;
-    pub fn plotcore_scene_strokes(scene: *const plotcore_scene) -> *const plotcore_segment;
-    pub fn plotcore_scene_text_count(scene: *const plotcore_scene) -> i64;
-    pub fn plotcore_scene_text(
+    pub fn plotcore_scene_line_strip_length(
         scene: *const plotcore_scene,
         index: i64,
-        out: *mut plotcore_text,
+        run: i64,
+    ) -> i64;
+    pub fn plotcore_scene_line_strip(
+        scene: *const plotcore_scene,
+        index: i64,
+        run: i64,
+    ) -> *const c_double;
+    pub fn plotcore_scene_under_count(scene: *const plotcore_scene) -> i64;
+    pub fn plotcore_scene_under(
+        scene: *const plotcore_scene,
+        index: i64,
+        out: *mut plotcore_mark,
+    ) -> plotcore_status;
+    pub fn plotcore_scene_over_count(scene: *const plotcore_scene) -> i64;
+    pub fn plotcore_scene_over(
+        scene: *const plotcore_scene,
+        index: i64,
+        out: *mut plotcore_mark,
     ) -> plotcore_status;
     pub fn plotcore_scene_legend_count(scene: *const plotcore_scene) -> i64;
     pub fn plotcore_scene_legend(
@@ -539,9 +614,9 @@ mod tests {
             std::mem::size_of::<plotcore_rgba>(),
             std::mem::size_of::<plotcore_chrome>(),
             std::mem::size_of::<plotcore_rect>(),
-            std::mem::size_of::<plotcore_segment>(),
+            std::mem::size_of::<plotcore_mark>(),
             std::mem::size_of::<plotcore_line_info>(),
-            std::mem::size_of::<plotcore_text>(),
+            std::mem::size_of::<plotcore_scene_request>(),
             std::mem::size_of::<plotcore_legend_entry>(),
             std::mem::size_of::<plotcore_reading>(),
         ];

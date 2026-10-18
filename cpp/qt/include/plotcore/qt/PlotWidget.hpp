@@ -77,6 +77,7 @@ protected:
 private:
     void applyMeasure();
     void drawText(QPainter& painter, const TextItem& text) const;
+    void paintMark(QPainter& painter, const Mark& mark, const QRectF& area) const;
 
     Figure figure_;
     Scene scene_;

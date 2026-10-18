@@ -1060,7 +1060,7 @@ int DemoWindow::selfTest(const QString& picture)
     xBase_->setCurrentIndex(3);
     xBaseCustom_->setValue(3.0);
     minorNumbers_->setChecked(true);
-    check(frame().texts.size() > logs.texts.size() / 2, "a custom base, and the minor numbers");
+    check(frame().texts().size() > logs.texts().size() / 2, "a custom base, and the minor numbers");
     xLog_->setChecked(false);
     yLog_->setChecked(false);
     for (int grid = 0; grid < 4; ++grid) {
@@ -1068,7 +1068,7 @@ int DemoWindow::selfTest(const QString& picture)
         gridStepX_->setValue(grid == 3 ? 100000.0 : 0.0);
         gridStepY_->setValue(grid == 3 ? 5.0 : 0.0);
         const plotcore::Scene ruled = frame();
-        check((grid == 0) == ruled.rules.empty(), kGrids[grid]);
+        check((grid == 0) == ruled.under.empty(), kGrids[grid]);
     }
     grid_->setCurrentIndex(1);
     title_->setText(QStringLiteral("Every signal"));

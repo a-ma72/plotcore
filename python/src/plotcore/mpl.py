@@ -12,6 +12,10 @@ own is drawn on a twin axis with that axis's window; one that is only moved or
 scaled is drawn on a twin axis with no spine, for the reason the figure gives
 it none.
 
+The frame is matplotlib's, which is this host's one decision; what answers the
+reader -- the crosshair and its reading, the band, why the pane cannot draw --
+is the scene's overlay, painted as the scene lays it out.
+
 `draw()` paints once, for a picture. `View` keeps a matplotlib figure live: a
 scroll, a drag and a band go through the plotcore figure's own gestures, so
 matplotlib zooms the line rather than the pane of it that was last drawn.
@@ -32,7 +36,7 @@ except ImportError as error:  # pragma: no cover
     raise ImportError("plotcore.mpl needs matplotlib: pip install plotcore[matplotlib]") from error
 
 from .figure import Button, Figure, Modifiers
-from .scene import Scene
+from .scene import FORM_RUNS, FORM_VALUES, Align, Layer, MarkKind, Scene, TextRole
 
 # How far apart the spines of axes of their own sit, in points.
 _SPINE = 48
@@ -163,9 +167,62 @@ def _paint(figure: Figure, scene: Scene, ax, extra: list) -> None:
                            facecolor=chrome.ground[:3], edgecolor=chrome.axis_rule[:3],
                            labelcolor=chrome.ink[:3])
         legend.set_zorder(10)
-    if scene.message:
-        ax.text(0.5, 0.5, scene.message, transform=ax.transAxes, ha="center", va="center",
-                wrap=True, color=chrome.ink[:3])
+    _overlay(figure, scene, ax)
+
+
+_ROLES = {
+    TextRole.TICK: "tickPixels",
+    TextRole.TICK_MINOR: "tickMinorPixels",
+    TextRole.TITLE: "titlePixels",
+    TextRole.AXIS_NAME: "axisNamePixels",
+    TextRole.LEGEND: "legendPixels",
+}
+_ACROSS = {Align.START: "left", Align.MIDDLE: "center", Align.END: "right"}
+_DOWN = {Align.START: "top", Align.MIDDLE: "center", Align.END: "bottom"}
+
+
+def _overlay(figure: Figure, scene: Scene, ax) -> None:
+    """Paint the scene's overlay onto `ax`, whose box is the scene's pane: a
+    pane pixel is a share of the axes, and a size in pixels is one in points
+    at the figure's dpi."""
+    area = scene.area
+    if area.width <= 0 or area.height <= 0:
+        return
+    style = figure.style
+    points = 72.0 / ax.figure.dpi
+
+    def at(x: float, y: float) -> Tuple[float, float]:
+        return (x - area.x) / area.width, 1.0 - (y - area.y) / area.height
+
+    for z, mark in enumerate(m for m in scene.over if m.layer == Layer.OVERLAY):
+        order = 20 + z * 1e-3
+        if mark.kind == MarkKind.SEGMENT:
+            (ax0, ay0), (ax1, ay1) = at(mark.x0, mark.y0), at(mark.x1, mark.y1)
+            ax.plot([ax0, ax1], [ay0, ay1], transform=ax.transAxes, color=mark.stroke[:3],
+                    alpha=mark.stroke[3], linewidth=mark.width * points,
+                    clip_on=mark.clipped, zorder=order)
+        elif mark.kind == MarkKind.BOX:
+            (left, top), (right, bottom) = at(mark.x0, mark.y0), at(mark.x1, mark.y1)
+            ax.add_patch(Rectangle(
+                (left, bottom), right - left, top - bottom, transform=ax.transAxes,
+                facecolor=mark.fill if mark.fill[3] > 0 else "none",
+                edgecolor=mark.stroke if mark.width > 0 else "none",
+                linewidth=mark.width * points, linestyle="--" if mark.dashed else "-",
+                clip_on=mark.clipped, zorder=order))
+        elif mark.kind == MarkKind.CIRCLE:
+            x, y = at(mark.x0, mark.y0)
+            ax.plot([x], [y], "o", transform=ax.transAxes,
+                    markerfacecolor=mark.fill if mark.fill[3] > 0 else "none",
+                    markeredgecolor=mark.stroke, markeredgewidth=mark.width * points,
+                    markersize=2.0 * mark.radius * points, clip_on=mark.clipped,
+                    zorder=order)
+        elif mark.kind == MarkKind.TEXT:
+            x, y = at(mark.x0, mark.y0)
+            ax.text(x, y, mark.text, transform=ax.transAxes, color=mark.colour[:3],
+                    alpha=mark.colour[3], rotation=-mark.turn, rotation_mode="anchor",
+                    ha=_ACROSS[mark.across], va=_DOWN[mark.down],
+                    fontsize=style[_ROLES[mark.role]] * points, clip_on=mark.clipped,
+                    zorder=order)
 
 
 def _pixels_of(ax) -> Tuple[int, int]:
@@ -184,7 +241,7 @@ def draw(figure: Figure, ax=None, *, size: Optional[Tuple[int, int]] = None):
         _, ax = plt.subplots()
     width, height = size if size is not None else _pixels_of(ax)
     figure.set_size(width, height)
-    scene = figure.scene()
+    scene = figure.scene(forms=FORM_RUNS | FORM_VALUES)
     _paint(figure, scene, ax, [])
     return ax
 
@@ -206,8 +263,6 @@ class View:
         self.ax.set_navigate(False)
         self._extra: list = []
         self._scene: Optional[Scene] = None
-        self._band = None
-        self._readout = None
         canvas = mpl_figure.canvas
         canvas.mpl_connect("scroll_event", self._scroll)
         canvas.mpl_connect("button_press_event", self._press)
@@ -229,34 +284,9 @@ class View:
         # The figure's pane is laid out at the axes' size, so a pixel of a
         # gesture is a pixel of the line and a band's minimum is a band's.
         self.figure.set_size(width, height)
-        self._scene = self.figure.scene()
+        self._scene = self.figure.scene(forms=FORM_RUNS | FORM_VALUES)
         _paint(self.figure, self._scene, self.ax, self._extra)
-        self._decorate()
         self.mpl.canvas.draw_idle()
-
-    def _decorate(self) -> None:
-        scene = self._scene
-        if scene is None:
-            return
-        area = scene.area
-        if scene.band is not None:
-            band = scene.band
-            left = (band.x - area.x) / area.width
-            top = (band.y - area.y) / area.height
-            self.ax.add_patch(Rectangle(
-                (left, 1.0 - top - band.height / area.height), band.width / area.width,
-                band.height / area.height, transform=self.ax.transAxes, fill=True,
-                alpha=0.12, color=scene.chrome.cursor_ink[:3], zorder=20))
-        if scene.reading.valid:
-            reading = scene.reading
-            self.ax.text(0.01, 0.99, f"x {reading.x_text}   y {reading.y_text}",
-                         transform=self.ax.transAxes, ha="left", va="top",
-                         color=scene.chrome.ink[:3], zorder=21,
-                         bbox=dict(facecolor=scene.ground[:3], edgecolor="none", alpha=0.85))
-            self.ax.plot([(reading.px - area.x) / area.width],
-                         [1.0 - (reading.py - area.y) / area.height], "o",
-                         transform=self.ax.transAxes, markerfacecolor="none",
-                         color=scene.chrome.cursor_ink[:3], zorder=21)
 
     # --- gestures ---------------------------------------------------------------
 

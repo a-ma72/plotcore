@@ -38,6 +38,33 @@ class Align(enum.IntEnum):
     END = 2
 
 
+class MarkKind(enum.IntEnum):
+    SEGMENT = 0
+    BOX = 1
+    CIRCLE = 2
+    TEXT = 3
+
+
+class Layer(enum.IntEnum):
+    """What a mark is part of, for a host that paints only some of it."""
+
+    #: The rules across the pane, under the lines.
+    GRID = 0
+    #: The axes, their numbers and names, the title and the legend.
+    FRAME = 1
+    #: The crosshair and its reading, the band, and why the pane cannot draw.
+    OVERLAY = 2
+
+
+#: The forms of a line a scene can carry; `Figure.scene(forms=...)` takes
+#: them or-ed together.
+FORM_RUNS = 1
+FORM_TRIANGLES = 2
+FORM_STRIPS = 4
+FORM_VALUES = 8
+FORM_ALL = 15
+
+
 @dataclass(frozen=True)
 class Rect:
     x: float
@@ -69,6 +96,7 @@ class Line:
     marker_radius: float
     runs: List[np.ndarray]
     values: List[np.ndarray]
+    strips: List[np.ndarray]
     triangles: np.ndarray
     markers: np.ndarray
     y_low: float
@@ -79,20 +107,41 @@ class Line:
 
 
 @dataclass
-class Text:
-    """A piece of text. `base` is set in `role`'s face and `exponent` raised
-    beside it in TICK_MINOR's; `text` is both in one string."""
+class Mark:
+    """One thing to paint, in pane pixels with y down, which a host translates
+    into its own call and decides nothing about.
 
-    x: float
-    y: float
-    across: Align
-    down: Align
-    role: TextRole
-    vertical: bool
-    colour: Colour
-    text: str
-    base: str
-    exponent: str
+    A SEGMENT runs from (x0, y0) to (x1, y1) in `stroke` at `width`. A BOX
+    runs from its top left (x0, y0) to its bottom right (x1, y1), filled with
+    `fill` and edged in `stroke` at `width`, its corners rounded to `radius`
+    and its edge in dashes when `dashed`. A CIRCLE is about (x0, y0) at
+    `radius`. A TEXT is at (x0, y0): `base` in `role`'s face and `exponent`
+    raised `rise` above it in TICK_MINOR's, `text` both in one string, turned
+    `turn` degrees clockwise about that point and aligned in the turned frame.
+    A clear fill is not painted, nor an edge of no width; a `clipped` mark is
+    painted only inside the pane."""
+
+    kind: MarkKind
+    layer: Layer
+    clipped: bool
+    dashed: bool
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+    fill: Colour
+    stroke: Colour
+    width: float
+    radius: float
+    role: TextRole = TextRole.TICK
+    across: Align = Align.START
+    down: Align = Align.START
+    colour: Colour = (0.0, 0.0, 0.0, 0.0)
+    turn: float = 0.0
+    rise: float = 0.0
+    text: str = ""
+    base: str = ""
+    exponent: str = ""
 
 
 @dataclass
@@ -116,22 +165,6 @@ class Reading:
     y_text: str = ""
 
 
-#: A rule or a stroke: both ends, a colour and a width.
-SEGMENT = np.dtype(
-    [
-        ("x0", "f8"),
-        ("y0", "f8"),
-        ("x1", "f8"),
-        ("y1", "f8"),
-        ("red", "f8"),
-        ("green", "f8"),
-        ("blue", "f8"),
-        ("alpha", "f8"),
-        ("width", "f8"),
-    ]
-)
-
-
 @dataclass
 class Scene:
     width: float
@@ -141,14 +174,27 @@ class Scene:
     area: Rect
     view: Tuple[float, float, float, float]
     message: str
+    #: Painted under the lines, in order: the grid.
+    under: List[Mark] = field(default_factory=list)
+    #: The lines, clipped to `area`.
     lines: List[Line] = field(default_factory=list)
-    rules: np.ndarray = field(default_factory=lambda: np.zeros(0, SEGMENT))
-    strokes: np.ndarray = field(default_factory=lambda: np.zeros(0, SEGMENT))
-    texts: List[Text] = field(default_factory=list)
+    #: Painted over the lines, in order: everything else.
+    over: List[Mark] = field(default_factory=list)
+    #: Which line is which, and where its row was laid out; `over` paints it.
     legend: List[LegendEntry] = field(default_factory=list)
     legend_rect: Optional[Rect] = None
     reading: Reading = field(default_factory=Reading)
     band: Optional[Rect] = None
+
+    @property
+    def texts(self) -> List[Mark]:
+        """The texts painted over the lines, in order."""
+        return [mark for mark in self.over if mark.kind == MarkKind.TEXT]
+
+    @property
+    def rules(self) -> List[Mark]:
+        """The grid's rules."""
+        return [mark for mark in self.under if mark.kind == MarkKind.SEGMENT]
 
 
 def _colour(rgba: _native.Rgba) -> Colour:
@@ -175,11 +221,38 @@ def _points(pointer, count: int) -> np.ndarray:
     return np.ctypeslib.as_array(pointer, shape=(count * 2,)).reshape(count, 2).copy()
 
 
-def _segments(pointer, count: int) -> np.ndarray:
-    if count <= 0 or not pointer:
-        return np.zeros(0, SEGMENT)
-    raw = ctypes.string_at(pointer, count * ctypes.sizeof(_native.Segment))
-    return np.frombuffer(raw, dtype=SEGMENT).copy()
+def _marks(handle, count: int, at) -> List[Mark]:
+    raw = _native.Mark()
+    out = []
+    for index in range(count):
+        at(handle, index, ctypes.byref(raw))
+        kind = MarkKind(raw.kind)
+        mark = Mark(
+            kind=kind,
+            layer=Layer(raw.layer),
+            clipped=bool(raw.clipped),
+            dashed=bool(raw.dashed),
+            x0=raw.x0,
+            y0=raw.y0,
+            x1=raw.x1,
+            y1=raw.y1,
+            fill=_colour(raw.fill),
+            stroke=_colour(raw.stroke),
+            width=raw.width,
+            radius=raw.radius,
+        )
+        if kind == MarkKind.TEXT:
+            mark.role = TextRole(raw.role)
+            mark.across = Align(raw.across)
+            mark.down = Align(raw.down)
+            mark.colour = _colour(raw.colour)
+            mark.turn = raw.turn
+            mark.rise = raw.raise_
+            mark.text = _text(raw.text)
+            mark.base = _text(raw.base)
+            mark.exponent = _text(raw.exponent)
+        out.append(mark)
+    return out
 
 
 def copy_scene(handle) -> Scene:
@@ -205,10 +278,17 @@ def copy_scene(handle) -> Scene:
         lib.plotcore_scene_line(handle, index, ctypes.byref(info))
         runs = []
         values = []
+        strips = []
         for run in range(info.run_count):
             count = lib.plotcore_scene_line_run_length(handle, index, run)
-            runs.append(_points(lib.plotcore_scene_line_run(handle, index, run), count))
-            values.append(_points(lib.plotcore_scene_line_run_values(handle, index, run), count))
+            if count:
+                runs.append(_points(lib.plotcore_scene_line_run(handle, index, run), count))
+                pointer = lib.plotcore_scene_line_run_values(handle, index, run)
+                if pointer:
+                    values.append(_points(pointer, count))
+            strip = lib.plotcore_scene_line_strip_length(handle, index, run)
+            if strip:
+                strips.append(_points(lib.plotcore_scene_line_strip(handle, index, run), strip))
         scene.lines.append(
             Line(
                 line=info.line,
@@ -217,6 +297,7 @@ def copy_scene(handle) -> Scene:
                 marker_radius=info.marker_radius,
                 runs=runs,
                 values=values,
+                strips=strips,
                 triangles=_points(lib.plotcore_scene_line_triangles(handle, index),
                                   info.triangle_points),
                 markers=_points(lib.plotcore_scene_line_markers(handle, index),
@@ -228,26 +309,8 @@ def copy_scene(handle) -> Scene:
                 numbered=bool(info.numbered),
             )
         )
-    scene.rules = _segments(lib.plotcore_scene_rules(handle), lib.plotcore_scene_rule_count(handle))
-    scene.strokes = _segments(lib.plotcore_scene_strokes(handle),
-                              lib.plotcore_scene_stroke_count(handle))
-    text = _native.Text()
-    for index in range(lib.plotcore_scene_text_count(handle)):
-        lib.plotcore_scene_text(handle, index, ctypes.byref(text))
-        scene.texts.append(
-            Text(
-                x=text.x,
-                y=text.y,
-                across=Align(text.across),
-                down=Align(text.down),
-                role=TextRole(text.role),
-                vertical=bool(text.vertical),
-                colour=_colour(text.colour),
-                text=_text(text.text),
-                base=_text(text.base),
-                exponent=_text(text.exponent),
-            )
-        )
+    scene.under = _marks(handle, lib.plotcore_scene_under_count(handle), lib.plotcore_scene_under)
+    scene.over = _marks(handle, lib.plotcore_scene_over_count(handle), lib.plotcore_scene_over)
     entry = _native.LegendEntry()
     for index in range(lib.plotcore_scene_legend_count(handle)):
         lib.plotcore_scene_legend(handle, index, ctypes.byref(entry))

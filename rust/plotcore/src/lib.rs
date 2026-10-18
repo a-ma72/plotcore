@@ -197,8 +197,9 @@ pub enum Appetite {
 }
 
 /// The faces text is set in; a host maps each to a font.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum TextRole {
+    #[default]
     Tick,
     TickMinor,
     Title,
@@ -237,8 +238,9 @@ impl TextRole {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Align {
+    #[default]
     Start,
     Middle,
     End,
@@ -311,17 +313,6 @@ pub struct Chrome {
     pub cursor_ink: Rgba,
 }
 
-/// A rule or a stroke.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct Segment {
-    pub x0: f64,
-    pub y0: f64,
-    pub x1: f64,
-    pub y1: f64,
-    pub colour: Rgba,
-    pub width: f64,
-}
-
 /// One drawn line. Points are pane pixels with y down; `values` are the same
 /// points in the data's own units.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -334,6 +325,8 @@ pub struct DrawnLine {
     pub values: Vec<Vec<[f64; 2]>>,
     /// The stroke as triangles, three points each.
     pub triangles: Vec<[f64; 2]>,
+    /// ...and as one triangle strip a run, two points a sample, when asked for.
+    pub strips: Vec<Vec<[f64; 2]>>,
     pub markers: Vec<[f64; 2]>,
     pub y_low: f64,
     pub y_high: f64,
@@ -342,21 +335,100 @@ pub struct DrawnLine {
     pub numbered: bool,
 }
 
-/// A piece of text: `base` in `role`'s face, `exponent` raised beside it in
-/// TickMinor's, `text` both in one string.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Text {
-    pub x: f64,
-    pub y: f64,
+/// What a mark is.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum MarkKind {
+    #[default]
+    Segment,
+    Box,
+    Circle,
+    Text,
+}
+
+/// What a mark is part of, for a host that paints only some of the picture.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Layer {
+    /// The rules across the pane, under the lines.
+    Grid,
+    /// The axes, their numbers and names, the title and the legend.
+    #[default]
+    Frame,
+    /// The crosshair and its reading, the band, and why the pane cannot draw.
+    Overlay,
+}
+
+/// One thing to paint, in pane pixels with y down, which a host translates
+/// into its own call and decides nothing about.
+///
+/// A segment runs from (x0, y0) to (x1, y1) in `stroke` at `width`. A box runs
+/// from its top left (x0, y0) to its bottom right (x1, y1), filled with `fill`
+/// and edged in `stroke` at `width`, its corners rounded to `radius` and its
+/// edge in dashes when `dashed`. A circle is about (x0, y0) at `radius`. A text
+/// is at (x0, y0): `base` in `role`'s face and `exponent` raised `raise` above
+/// it in TickMinor's, `text` both in one string, turned `turn` degrees
+/// clockwise about that point and aligned in the turned frame. A clear fill is
+/// not painted, nor an edge of no width; a `clipped` mark is painted only
+/// inside the pane.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Mark {
+    pub kind: MarkKind,
+    pub layer: Layer,
+    pub clipped: bool,
+    pub dashed: bool,
+    pub x0: f64,
+    pub y0: f64,
+    pub x1: f64,
+    pub y1: f64,
+    pub fill: Rgba,
+    pub stroke: Rgba,
+    pub width: f64,
+    pub radius: f64,
+    pub role: TextRole,
     pub across: Align,
     pub down: Align,
-    pub role: TextRole,
-    pub vertical: bool,
     pub colour: Rgba,
+    pub turn: f64,
+    pub raise: f64,
     pub text: String,
     pub base: String,
     pub exponent: String,
 }
+
+/// What a scene is asked for: see `Figure::scene_for`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SceneRequest {
+    /// The forms of a line it carries: `FORM_*` or-ed together.
+    pub forms: i32,
+    /// A picture of (width, height): the pane laid out again at that size,
+    /// from what the lines hold for the pane, with no band.
+    pub picture: Option<(f64, f64)>,
+    pub pixel_ratio: f64,
+    /// The light scope's picture, whatever the settings say.
+    pub paper: bool,
+    /// No ground at all.
+    pub transparent: bool,
+    /// The crosshair on this sample of this line: (line, x, y).
+    pub reading: Option<(i32, f64, f64)>,
+}
+
+impl Default for SceneRequest {
+    fn default() -> Self {
+        Self {
+            forms: FORM_ALL,
+            picture: None,
+            pixel_ratio: 0.0,
+            paper: false,
+            transparent: false,
+            reading: None,
+        }
+    }
+}
+
+pub const FORM_RUNS: i32 = sys::PLOTCORE_FORM_RUNS;
+pub const FORM_TRIANGLES: i32 = sys::PLOTCORE_FORM_TRIANGLES;
+pub const FORM_STRIPS: i32 = sys::PLOTCORE_FORM_STRIPS;
+pub const FORM_VALUES: i32 = sys::PLOTCORE_FORM_VALUES;
+pub const FORM_ALL: i32 = sys::PLOTCORE_FORM_ALL;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LegendEntry {
@@ -390,14 +462,29 @@ pub struct Scene {
     /// x0, x1, y0, y1.
     pub view: [f64; 4],
     pub message: String,
+    /// Painted under the lines, in order: the grid.
+    pub under: Vec<Mark>,
+    /// The lines, clipped to `area`.
     pub lines: Vec<DrawnLine>,
-    pub rules: Vec<Segment>,
-    pub strokes: Vec<Segment>,
-    pub texts: Vec<Text>,
+    /// Painted over the lines, in order: everything else.
+    pub over: Vec<Mark>,
+    /// Which line is which, and where its row was laid out; `over` paints it.
     pub legend: Vec<LegendEntry>,
     pub legend_rect: Option<Rect>,
     pub reading: Option<Reading>,
     pub band: Option<Rect>,
+}
+
+impl Scene {
+    /// The texts painted over the lines, in order.
+    pub fn texts(&self) -> impl Iterator<Item = &Mark> {
+        self.over.iter().filter(|mark| mark.kind == MarkKind::Text)
+    }
+
+    /// The grid's rules.
+    pub fn rules(&self) -> impl Iterator<Item = &Mark> {
+        self.under.iter().filter(|mark| mark.kind == MarkKind::Segment)
+    }
 }
 
 /// # Safety
@@ -412,23 +499,60 @@ unsafe fn points(pointer: *const c_double, count: i64) -> Vec<[f64; 2]> {
 }
 
 /// # Safety
-/// `pointer` is null or holds `count` segments.
-unsafe fn segments(pointer: *const sys::plotcore_segment, count: i64) -> Vec<Segment> {
-    if pointer.is_null() || count <= 0 {
-        return Vec::new();
+/// `scene` is a live scene and `at` reads its marks.
+unsafe fn marks(
+    scene: *const sys::plotcore_scene,
+    count: i64,
+    at: unsafe extern "C" fn(*const sys::plotcore_scene, i64, *mut sys::plotcore_mark) -> c_int,
+) -> Vec<Mark> {
+    let mut out = Vec::with_capacity(count.max(0) as usize);
+    for index in 0..count {
+        let mut m = sys::plotcore_mark::default();
+        // SAFETY: the caller's promise; the strings live as long as the scene.
+        unsafe { at(scene, index, &mut m) };
+        let kind = match m.kind {
+            sys::PLOTCORE_MARK_BOX => MarkKind::Box,
+            sys::PLOTCORE_MARK_CIRCLE => MarkKind::Circle,
+            sys::PLOTCORE_MARK_TEXT => MarkKind::Text,
+            _ => MarkKind::Segment,
+        };
+        let layer = match m.layer {
+            sys::PLOTCORE_LAYER_GRID => Layer::Grid,
+            sys::PLOTCORE_LAYER_OVERLAY => Layer::Overlay,
+            _ => Layer::Frame,
+        };
+        let mut mark = Mark {
+            kind,
+            layer,
+            clipped: m.clipped != 0,
+            dashed: m.dashed != 0,
+            x0: m.x0,
+            y0: m.y0,
+            x1: m.x1,
+            y1: m.y1,
+            fill: m.fill.into(),
+            stroke: m.stroke.into(),
+            width: m.width,
+            radius: m.radius,
+            ..Mark::default()
+        };
+        if kind == MarkKind::Text {
+            mark.role = TextRole::of(m.role);
+            mark.across = Align::of(m.across);
+            mark.down = Align::of(m.down);
+            mark.colour = m.colour.into();
+            mark.turn = m.turn;
+            mark.raise = m.raise;
+            // SAFETY: as above.
+            unsafe {
+                mark.text = text_of(m.text);
+                mark.base = text_of(m.base);
+                mark.exponent = text_of(m.exponent);
+            }
+        }
+        out.push(mark);
     }
-    // SAFETY: the caller's promise.
-    let raw = unsafe { std::slice::from_raw_parts(pointer, count as usize) };
-    raw.iter()
-        .map(|s| Segment {
-            x0: s.x0,
-            y0: s.y0,
-            x1: s.x1,
-            y1: s.y1,
-            colour: s.colour.into(),
-            width: s.width,
-        })
-        .collect()
+    out
 }
 
 /// # Safety
@@ -474,32 +598,23 @@ unsafe fn copy_scene(scene: *const sys::plotcore_scene) -> Scene {
             };
             for run in 0..info.run_count {
                 let count = sys::plotcore_scene_line_run_length(scene, index, run);
-                line.runs.push(points(sys::plotcore_scene_line_run(scene, index, run), count));
-                line.values
-                    .push(points(sys::plotcore_scene_line_run_values(scene, index, run), count));
+                if count > 0 {
+                    line.runs.push(points(sys::plotcore_scene_line_run(scene, index, run), count));
+                    let values = sys::plotcore_scene_line_run_values(scene, index, run);
+                    if !values.is_null() {
+                        line.values.push(points(values, count));
+                    }
+                }
+                let strip = sys::plotcore_scene_line_strip_length(scene, index, run);
+                if strip > 0 {
+                    line.strips
+                        .push(points(sys::plotcore_scene_line_strip(scene, index, run), strip));
+                }
             }
             out.lines.push(line);
         }
-        out.rules =
-            segments(sys::plotcore_scene_rules(scene), sys::plotcore_scene_rule_count(scene));
-        out.strokes =
-            segments(sys::plotcore_scene_strokes(scene), sys::plotcore_scene_stroke_count(scene));
-        for index in 0..sys::plotcore_scene_text_count(scene) {
-            let mut t = std::mem::zeroed::<sys::plotcore_text>();
-            sys::plotcore_scene_text(scene, index, &mut t);
-            out.texts.push(Text {
-                x: t.x,
-                y: t.y,
-                across: Align::of(t.across),
-                down: Align::of(t.down),
-                role: TextRole::of(t.role),
-                vertical: t.vertical != 0,
-                colour: t.colour.into(),
-                text: text_of(t.text),
-                base: text_of(t.base),
-                exponent: text_of(t.exponent),
-            });
-        }
+        out.under = marks(scene, sys::plotcore_scene_under_count(scene), sys::plotcore_scene_under);
+        out.over = marks(scene, sys::plotcore_scene_over_count(scene), sys::plotcore_scene_over);
         for index in 0..sys::plotcore_scene_legend_count(scene) {
             let mut e = std::mem::zeroed::<sys::plotcore_legend_entry>();
             sys::plotcore_scene_legend(scene, index, &mut e);
@@ -1076,9 +1191,34 @@ impl Figure {
     // --- the picture
 
     pub fn scene(&mut self) -> Result<Scene> {
+        self.scene_for(&SceneRequest::default())
+    }
+
+    /// The picture as `request` asks for it: the forms of a line a host draws,
+    /// or a picture -- the pane laid out again at another size, from what the
+    /// lines hold for the pane, with a crosshair only where one is pinned.
+    pub fn scene_for(&mut self, request: &SceneRequest) -> Result<Scene> {
+        let mut raw_request = sys::plotcore_scene_request {
+            forms: request.forms,
+            paper: request.paper as i32,
+            transparent: request.transparent as i32,
+            ..Default::default()
+        };
+        if let Some((width, height)) = request.picture {
+            raw_request.picture = 1;
+            raw_request.width = width;
+            raw_request.height = height;
+            raw_request.pixel_ratio = request.pixel_ratio;
+        }
+        if let Some((line, x, y)) = request.reading {
+            raw_request.pinned = 1;
+            raw_request.reading_line = line;
+            raw_request.reading_x = x;
+            raw_request.reading_y = y;
+        }
         // SAFETY: the scene is copied out whole and freed before returning.
         unsafe {
-            let raw = sys::plotcore_scene_new(self.raw());
+            let raw = sys::plotcore_scene_request_new(self.raw(), &raw_request);
             if raw.is_null() {
                 return Err(Error { status: Status::Internal, message: last_error() });
             }
