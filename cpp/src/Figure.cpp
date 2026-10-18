@@ -112,6 +112,8 @@ double FigureStyle::pixelsOf(TextRole role) const
         return axisNamePixels;
     case TextRole::Legend:
         return legendPixels;
+    case TextRole::Note:
+        return notePixels;
     case TextRole::Tick:
         break;
     }
@@ -892,47 +894,46 @@ Scene Figure::compose(const SceneRequest& request)
     }
 
     // --- what is painted, as marks -----------------------------------------------
-    const auto segment = [](Point from, Point to, Rgba colour, double width,
-                            Mark::Layer layer = Mark::Layer::Frame, bool clipped = false) {
-        Mark mark;
-        mark.kind = Mark::Kind::Segment;
-        mark.layer = layer;
-        mark.clipped = clipped;
-        mark.from = from;
-        mark.to = to;
-        mark.stroke = colour;
-        mark.width = width;
-        return mark;
-    };
-    const auto written = [&](TextItem item, Mark::Layer layer = Mark::Layer::Frame) {
+    // Positions are whole pixels wherever the viewer's frame rounds them
+    // (Math.round, which is jsRound), and every rule is a filled hairline
+    // rather than a segment: a box of one pixel is one pixel in every toolkit,
+    // and a stroke one pixel wide is two half-covered rows in some of them.
+    const auto written = [&](TextItem item, Mark::Layer layer = Mark::Layer::Frame,
+                             bool clipped = false) {
         Mark mark;
         mark.kind = Mark::Kind::Text;
         mark.layer = layer;
+        mark.clipped = clipped;
         item.raise = s.exponentRaise;
         mark.from = item.at;
         mark.text = std::move(item);
         return mark;
     };
     const auto boxed = [](const PaneRect& rect, Rgba fill, Rgba edge, double width,
-                          Mark::Layer layer) {
+                          Mark::Layer layer, double radius = 0.0, bool clipped = false) {
         Mark mark;
         mark.kind = Mark::Kind::Box;
         mark.layer = layer;
+        mark.clipped = clipped;
         mark.from = Point(rect.x, rect.y);
         mark.to = Point(rect.x + rect.width, rect.y + rect.height);
         mark.fill = fill;
         mark.stroke = edge;
         mark.width = width;
+        mark.radius = radius;
         return mark;
     };
-    // The ground again, a little thinner, under what is written over the pane.
-    Rgba veil = chrome.ground;
-    veil.alpha = 0.85;
+    const Rgba clear = Rgba::of(0.0, 0.0, 0.0, 0.0);
+    const auto filled = [&](double x, double y, double width, double height, Rgba colour,
+                            Mark::Layer layer = Mark::Layer::Frame, bool clipped = false) {
+        return boxed(PaneRect{x, y, width, height}, colour, clear, 0.0, layer, 0.0, clipped);
+    };
+    const double hairline = s.ruleWidth;
 
     // --- the rules, under everything ----------------------------------------
     const PaneRect& a = lay.area;
-    const auto alongX = [&](double fraction) { return a.x + fraction * a.width; };
-    const auto upY = [&](double fraction) { return a.y + a.height - fraction * a.height; };
+    const auto alongX = [&](double fraction) { return jsRound(a.x + fraction * a.width); };
+    const auto upY = [&](double fraction) { return jsRound(a.y + (1.0 - fraction) * a.height); };
     const CameraAxis& cx = camera_.x;
     const CameraAxis& cy = camera_.y;
     TickStyle tickStyle;
@@ -945,37 +946,42 @@ Scene Figure::compose(const SceneRequest& request)
                                           ? gridValues(settings_.grid, cy.viewLow(), cy.viewHigh(),
                                                        settings_.gridStepY, lay.yTicks, tickStyle)
                                           : std::vector<double>{};
-    const auto ruleSegment = [&](double fraction, bool ofX, bool major) {
+    // PlotFrame.acrossRules and downRules: a hairline the width or the height
+    // of the pane, at the rule's place rounded to a pixel.
+    const auto rule = [&](double fraction, bool ofX, bool major) {
         const Rgba colour = major ? chrome.ruleMajor : chrome.ruleMinor;
-        const bool vertical = ofX != settings_.flipped;
-        if (vertical) {
-            const double at = alongX(fraction);
-            return segment(Point(at, a.y), Point(at, a.y + a.height), colour, s.ruleWidth,
-                           Mark::Layer::Grid);
+        if (ofX != settings_.flipped) {
+            return filled(alongX(fraction), a.y, hairline, a.height, colour, Mark::Layer::Grid);
         }
-        const double at = upY(fraction);
-        return segment(Point(a.x, at), Point(a.x + a.width, at), colour, s.ruleWidth,
-                       Mark::Layer::Grid);
+        return filled(a.x, upY(fraction), a.width, hairline, colour, Mark::Layer::Grid);
     };
-    for (const Rule& rule : gridAt(settings_.grid, xGrid, lay.xTicks.values, cx.viewLow(),
-                                   cx.viewHigh(), cx.logarithmic, cx.base)) {
-        if (rule.at >= 0.0 && rule.at <= 1.0) {
-            scene.under.push_back(ruleSegment(rule.at, true, rule.major));
+    for (const Rule& found : gridAt(settings_.grid, xGrid, lay.xTicks.values, cx.viewLow(),
+                                    cx.viewHigh(), cx.logarithmic, cx.base)) {
+        if (found.at >= 0.0 && found.at <= 1.0) {
+            scene.under.push_back(rule(found.at, true, found.major));
         }
     }
-    for (const Rule& rule : gridAt(settings_.grid, yGrid, lay.yTicks.values, cy.viewLow(),
-                                   cy.viewHigh(), cy.logarithmic, cy.base)) {
-        if (rule.at >= 0.0 && rule.at <= 1.0) {
-            scene.under.push_back(ruleSegment(rule.at, false, rule.major));
+    for (const Rule& found : gridAt(settings_.grid, yGrid, lay.yTicks.values, cy.viewLow(),
+                                    cy.viewHigh(), cy.logarithmic, cy.base)) {
+        if (found.at >= 0.0 && found.at <= 1.0) {
+            scene.under.push_back(rule(found.at, false, found.major));
         }
     }
 
-    // --- the axes, their ticks and their numbers -----------------------------
+    // --- the frame ------------------------------------------------------------------
+    // All four sides, a hairline wider and taller than the pane: the left rule
+    // on the pane's first column and the bottom one on the row under its last
+    // -- PlotFrame's bordered rectangle, which is what gives the pane an edge
+    // a trace leaving the window stops at.
     const Rgba axisColour = chrome.axisRule;
-    scene.over.push_back(
-        segment(Point(a.x, a.y), Point(a.x, a.y + a.height), axisColour, s.ruleWidth));
-    scene.over.push_back(segment(Point(a.x, a.y + a.height), Point(a.x + a.width, a.y + a.height),
-                                 axisColour, s.ruleWidth));
+    scene.over.push_back(filled(a.x, a.y, a.width + hairline, hairline, axisColour));
+    scene.over.push_back(filled(a.x, a.y + a.height, a.width + hairline, hairline, axisColour));
+    scene.over.push_back(filled(a.x, a.y, hairline, a.height + hairline, axisColour));
+    scene.over.push_back(filled(a.x + a.width, a.y, hairline, a.height + hairline, axisColour));
+
+    // --- the numbers on the common axes ------------------------------------------
+    // Beside the pane with a gap and no tick: the grid is what a number is
+    // read against, and a tick under a rule would be the rule drawn twice.
     const bool leftOfX = settings_.flipped;
     const auto leftFraction = [&](double value) {
         return leftOfX ? fractionOn(value, cx.viewLow(), cx.viewHigh(), cx.logarithmic, cx.base)
@@ -998,16 +1004,26 @@ Scene Figure::compose(const SceneRequest& request)
         item.colour = colour;
         scene.over.push_back(written(std::move(item)));
     };
+    const auto addName = [&](const std::string& text, Point at, TextItem::Align down, double room,
+                             double turn, Rgba colour) {
+        TextItem name;
+        name.text = name.base = elided(text, room, TextRole::AxisName);
+        name.at = at;
+        name.across = TextItem::Align::Middle;
+        name.down = down;
+        name.role = TextRole::AxisName;
+        name.colour = colour;
+        name.turn = turn;
+        scene.over.push_back(written(std::move(name)));
+    };
+    const double bottom = a.y + a.height;
     for (std::size_t i = 0; i < lay.leftTicks.values.size(); ++i) {
         const double f = leftFraction(lay.leftTicks.values[i]);
         if (f < -1e-9 || f > 1.0 + 1e-9) {
             continue;
         }
-        const double at = upY(f);
-        scene.over.push_back(
-            segment(Point(a.x - s.tickLength, at), Point(a.x, at), axisColour, s.ruleWidth));
-        addText(lay.leftTicks.texts[i], Point(a.x - s.tickLength - s.gapXS, at),
-                TextItem::Align::End, TextItem::Align::Middle, TextRole::Tick, chrome.ink);
+        addText(lay.leftTicks.texts[i], Point(a.x - s.gapS, upY(f)), TextItem::Align::End,
+                TextItem::Align::Middle, TextRole::Tick, chrome.ink);
     }
     const bool footNumbered = !settings_.flipped || lay.common;
     if (footNumbered) {
@@ -1016,12 +1032,8 @@ Scene Figure::compose(const SceneRequest& request)
             if (f < -1e-9 || f > 1.0 + 1e-9) {
                 continue;
             }
-            const double at = alongX(f);
-            const double bottom = a.y + a.height;
-            scene.over.push_back(segment(Point(at, bottom), Point(at, bottom + s.tickLength),
-                                         axisColour, s.ruleWidth));
-            addText(lay.footTicks.texts[i], Point(at, bottom + s.gapS), TextItem::Align::Middle,
-                    TextItem::Align::Start, TextRole::Tick, chrome.ink);
+            addText(lay.footTicks.texts[i], Point(alongX(f), bottom + s.s3),
+                    TextItem::Align::Middle, TextItem::Align::Start, TextRole::Tick, chrome.ink);
         }
     }
 
@@ -1041,20 +1053,19 @@ Scene Figure::compose(const SceneRequest& request)
     const CameraAxis& footAxis = settings_.flipped ? cy : cx;
     if (settings_.flipped || lay.common) {
         for (const MinorNumber& number : minors(leftGrid, leftSet, leftAxis, true, a.height)) {
-            addText(TickLabel{number.text, "", number.text},
-                    Point(a.x - s.tickLength - s.gapXS, upY(number.at)), TextItem::Align::End,
-                    TextItem::Align::Middle, TextRole::TickMinor, chrome.ink);
+            addText(TickLabel{number.text, "", number.text}, Point(a.x - s.gapS, upY(number.at)),
+                    TextItem::Align::End, TextItem::Align::Middle, TextRole::TickMinor, chrome.ink);
         }
     }
     if (footNumbered) {
         for (const MinorNumber& number : minors(footGrid, footSet, footAxis, false, a.width)) {
             addText(TickLabel{number.text, "", number.text},
-                    Point(alongX(number.at), a.y + a.height + s.gapS), TextItem::Align::Middle,
+                    Point(alongX(number.at), bottom + s.s3), TextItem::Align::Middle,
                     TextItem::Align::Start, TextRole::TickMinor, chrome.ink);
         }
     }
 
-    // The names and the title.
+    // The names and the title, each cut to the side it names.
     const std::string& leftName = settings_.flipped ? settings_.xLabel
                                   : lay.common      ? settings_.yLabel
                                                     : std::string();
@@ -1062,31 +1073,19 @@ Scene Figure::compose(const SceneRequest& request)
                                   : lay.common       ? settings_.yLabel
                                                      : std::string();
     if (!leftName.empty()) {
-        TextItem name;
-        name.text = name.base = leftName;
-        name.at = Point(lay.sideWidth + std::ceil(lay.nameHeight) / 2.0, a.y + a.height / 2.0);
-        name.across = TextItem::Align::Middle;
-        name.down = TextItem::Align::Middle;
-        name.role = TextRole::AxisName;
-        name.colour = chrome.ink;
-        name.turn = -90.0;
-        scene.over.push_back(written(std::move(name)));
+        addName(leftName,
+                Point(lay.sideWidth + std::ceil(lay.nameHeight) / 2.0, a.y + a.height / 2.0),
+                TextItem::Align::Middle, a.height, -90.0, chrome.ink);
     }
     if (!footName.empty()) {
-        TextItem name;
-        name.text = name.base = footName;
-        name.at = Point(a.x + a.width / 2.0,
-                        a.y + a.height +
-                            (footNumbered ? std::ceil(lay.tickHeight) + s.gapS : s.gapS) + s.gapXS);
-        name.across = TextItem::Align::Middle;
-        name.down = TextItem::Align::Start;
-        name.role = TextRole::AxisName;
-        name.colour = chrome.ink;
-        scene.over.push_back(written(std::move(name)));
+        addName(footName,
+                Point(a.x + a.width / 2.0,
+                      bottom + (footNumbered ? s.s3 + std::ceil(lay.tickHeight) : 0.0) + s.gapXS),
+                TextItem::Align::Start, a.width, 0.0, chrome.ink);
     }
     if (!settings_.title.empty()) {
         TextItem title;
-        title.text = title.base = settings_.title;
+        title.text = title.base = elided(settings_.title, a.width, TextRole::Title);
         title.at = Point(a.x + a.width / 2.0, s.gapS);
         title.across = TextItem::Align::Middle;
         title.down = TextItem::Align::Start;
@@ -1096,64 +1095,57 @@ Scene Figure::compose(const SceneRequest& request)
     }
 
     // --- the axes of their own ------------------------------------------------
+    // In the colour of the line each is the axis of, which is the whole of how
+    // a reader tells which axis a line is read against; the rule at the
+    // accent's weight, because a hairline of colour on black is a colour
+    // nobody can name.
     for (const Layout::Side& side : lay.sides) {
         const double base = cy.base;
         if (!settings_.flipped) {
-            // A column: rule, tick and number right to left from the rule.
-            const double rule = side.at + side.extent;
-            scene.over.push_back(
-                segment(Point(rule, a.y), Point(rule, a.y + a.height), side.colour, s.accentWidth));
+            // A column: its name, its numbers, a gap, a tick and a rule, right
+            // to left from the rule.
+            const double right = side.at + side.extent;
+            scene.over.push_back(filled(right - s.accentWidth, a.y, s.accentWidth,
+                                        a.height + hairline, side.colour));
             for (std::size_t i = 0; i < side.ticks.values.size(); ++i) {
                 const double f = fractionOn(side.ticks.values[i], side.window.low, side.window.high,
                                             side.window.logarithmic, base);
                 if (f < -1e-9 || f > 1.0 + 1e-9) {
                     continue;
                 }
-                const double at = upY(f);
-                scene.over.push_back(
-                    segment(Point(rule - s.s3, at), Point(rule, at), side.colour, s.ruleWidth));
-                addText(side.ticks.texts[i], Point(rule - s.s3 - s.gapS, at), TextItem::Align::End,
+                const double at = a.y + jsRound((1.0 - f) * a.height);
+                const double tick = right - s.accentWidth - s.s3;
+                scene.over.push_back(filled(tick, at, s.s3, hairline, side.colour));
+                addText(side.ticks.texts[i], Point(tick - s.gapS, at), TextItem::Align::End,
                         TextItem::Align::Middle, TextRole::Tick, side.colour);
             }
             if (!side.label.empty()) {
-                TextItem name;
-                name.text = name.base = side.label;
-                name.at = Point(side.at + std::ceil(lay.nameHeight) / 2.0, a.y + a.height / 2.0);
-                name.across = TextItem::Align::Middle;
-                name.down = TextItem::Align::Middle;
-                name.role = TextRole::AxisName;
-                name.colour = side.colour;
-                name.turn = -90.0;
-                scene.over.push_back(written(std::move(name)));
+                addName(side.label,
+                        Point(side.at + std::ceil(lay.nameHeight) / 2.0, a.y + a.height / 2.0),
+                        TextItem::Align::Middle, a.height, -90.0, side.colour);
             }
             continue;
         }
-        // A row under the foot: rule, tick and numbers top to bottom.
-        const double rule = a.y + a.height + lay.footHeight + side.at;
-        scene.over.push_back(
-            segment(Point(a.x, rule), Point(a.x + a.width, rule), side.colour, s.accentWidth));
+        // A row under the foot: a rule, a tick, its numbers and its name, top
+        // to bottom.
+        const double top = bottom + lay.footHeight + side.at;
+        scene.over.push_back(filled(a.x, top, a.width + hairline, s.accentWidth, side.colour));
         for (std::size_t i = 0; i < side.ticks.values.size(); ++i) {
             const double f = fractionOn(side.ticks.values[i], side.window.low, side.window.high,
                                         side.window.logarithmic, base);
             if (f < -1e-9 || f > 1.0 + 1e-9) {
                 continue;
             }
-            const double at = alongX(f);
-            scene.over.push_back(
-                segment(Point(at, rule), Point(at, rule + s.s3), side.colour, s.ruleWidth));
-            addText(side.ticks.texts[i], Point(at, rule + s.accentWidth + s.s3),
+            const double at = a.x + jsRound(f * a.width);
+            scene.over.push_back(filled(at, top + s.accentWidth, hairline, s.s3, side.colour));
+            addText(side.ticks.texts[i], Point(at, top + s.accentWidth + s.s3),
                     TextItem::Align::Middle, TextItem::Align::Start, TextRole::Tick, side.colour);
         }
         if (!side.label.empty()) {
-            TextItem name;
-            name.text = name.base = side.label;
-            name.at = Point(a.x + a.width / 2.0,
-                            rule + s.accentWidth + s.s3 + std::ceil(lay.tickHeight) + s.gapXS);
-            name.across = TextItem::Align::Middle;
-            name.down = TextItem::Align::Start;
-            name.role = TextRole::AxisName;
-            name.colour = side.colour;
-            scene.over.push_back(written(std::move(name)));
+            addName(side.label,
+                    Point(a.x + a.width / 2.0,
+                          top + s.accentWidth + s.s3 + std::ceil(lay.tickHeight) + s.gapXS),
+                    TextItem::Align::Start, a.width, 0.0, side.colour);
         }
     }
 
@@ -1161,6 +1153,12 @@ Scene Figure::compose(const SceneRequest& request)
     // Which line, which sample, and where it was drawn in the pane: taken from
     // the pointer on the pane, or named outright for a picture nobody is
     // pointing at.
+    //
+    // Off while a band is being drawn (PlotSurface.selecting), and only then:
+    // what the reader is doing during a band is choosing an interval, the band
+    // writes that interval out, and a second readout snapped to whichever
+    // sample is nearest would be a second answer to a question nobody asked
+    // twice. A pan is not that, and reads as it goes.
     struct Taken
     {
         int position = -1;
@@ -1170,7 +1168,7 @@ Scene Figure::compose(const SceneRequest& request)
         double py = 0.0;
     };
     std::optional<Taken> taken;
-    if (!request.picture && settings_.cursor && pointer_.has_value() && drag_ == Drag::None &&
+    if (!request.picture && settings_.cursor && pointer_.has_value() && drag_ != Drag::Band &&
         scene.message.empty()) {
         const double px = pointer_->x() - a.x;
         const double py = pointer_->y() - a.y;
@@ -1227,64 +1225,92 @@ Scene Figure::compose(const SceneRequest& request)
         reading.x = taken->x;
         reading.y = taken->y;
         reading.at = Point(a.x + taken->px, a.y + taken->py);
-        reading.xText = axisLabel(taken->x, cx.viewLow(), cx.viewHigh(), lay.xTicks.logarithmic);
-        const LineWindow& window = windows[static_cast<std::size_t>(taken->position)];
-        reading.yText =
-            window.own ? axisLabel(taken->y, window.low, window.high, window.logarithmic)
-                       : axisLabel(taken->y, cy.viewLow(), cy.viewHigh(), lay.yTicks.logarithmic);
-        scene.over.push_back(segment(Point(reading.at.x(), a.y),
-                                     Point(reading.at.x(), a.y + a.height), axisColour, s.ruleWidth,
-                                     Mark::Layer::Overlay, true));
-        scene.over.push_back(segment(Point(a.x, reading.at.y()),
-                                     Point(a.x + a.width, reading.at.y()), axisColour, s.ruleWidth,
-                                     Mark::Layer::Overlay, true));
-        // The sample itself, so the reader can see which one was taken.
+        reading.xText = readingText(taken->x);
+        reading.yText = readingText(taken->y);
+        // Clipped to the pane, which answers every way the sample can be off
+        // it at once: the rule through an x on screen stays, and the rule and
+        // the ring at a y above the pane go, because what they mark is not
+        // there to be marked.
+        scene.over.push_back(filled(a.x, a.y + jsRound(taken->py), a.width, hairline, axisColour,
+                                    Mark::Layer::Overlay, true));
+        scene.over.push_back(filled(a.x + jsRound(taken->px), a.y, hairline, a.height, axisColour,
+                                    Mark::Layer::Overlay, true));
+        // The sample itself, ringed in the accent so the reader can see which
+        // one was taken: as wide as a marker and its ring, the ring inside.
         Mark ring;
         ring.kind = Mark::Kind::Circle;
         ring.layer = Mark::Layer::Overlay;
         ring.clipped = true;
         ring.from = reading.at;
-        ring.radius = 3.0;
+        ring.radius = (s.markerSize + s.accentWidth) / 2.0 - s.accentWidth / 2.0;
         ring.stroke = chrome.cursorInk;
-        ring.width = s.ruleWidth;
+        ring.width = s.accentWidth;
         scene.over.push_back(ring);
     }
 
-    // --- the legend ----------------------------------------------------------
+    // --- the legend on the plot ------------------------------------------------
+    // PlotOverlayLegend: a caption in a corner, part of the picture that
+    // leaves -- so it names the lines rather than merely showing that there
+    // are some. It names the first plotLegendRows of them and counts the
+    // rest: a legend ten thousand rows tall is the picture replaced by a list
+    // of what is in it. No wider than half the pane, with a name too long for
+    // it cut in the middle, where a path keeps its two ends.
     if (settings_.legend && !scene.legend.empty()) {
-        const double swatch = s.gapL;
-        double widest = 0.0;
-        for (const LegendEntry& entry : scene.legend) {
-            widest = std::max(widest, measure_.width(entry.name, TextRole::Legend));
+        const auto named = std::min<std::size_t>(
+            scene.legend.size(), static_cast<std::size_t>(std::max(s.legendRows, 0)));
+        const std::size_t unnamed = scene.legend.size() - named;
+        std::string longest;
+        for (std::size_t i = 0; i < named; ++i) {
+            if (textLength(scene.legend[i].name) > textLength(longest)) {
+                longest = scene.legend[i].name;
+            }
         }
-        const double row = std::ceil(measure_.height(TextRole::Legend));
-        const double width = s.gapS + swatch + s.gapS + std::ceil(widest) + s.gapS;
-        const double height = s.gapS + row * static_cast<double>(scene.legend.size()) + s.gapS;
+        const double row = std::ceil(measure_.height(TextRole::Legend)) + s.gapXS;
+        const double wanted = s.gapM * 2.0 + s.legendSwatch + s.gapS +
+                              std::ceil(measure_.width(longest, TextRole::Legend));
+        const double width = std::min(wanted, std::max(0.0, a.width * 0.5));
+        const double rows = static_cast<double>(named) + (unnamed > 0 ? 1.0 : 0.0);
+        const double height = row * rows + s.gapS * 2.0;
         const bool atLeft = settings_.legendCorner == Corner::TopLeft ||
                             settings_.legendCorner == Corner::BottomLeft;
         const bool atTop =
             settings_.legendCorner == Corner::TopLeft || settings_.legendCorner == Corner::TopRight;
         scene.legendRect =
-            PaneRect{atLeft ? a.x + s.gapM : a.x + a.width - s.gapM - width,
-                     atTop ? a.y + s.gapM : a.y + a.height - s.gapM - height, width, height};
+            PaneRect{atLeft ? a.x + s.gapM : a.x + a.width - width - s.gapM,
+                     atTop ? a.y + s.gapM : a.y + a.height - height - s.gapM, width, height};
         const PaneRect& box = scene.legendRect;
-        for (std::size_t i = 0; i < scene.legend.size(); ++i) {
+        scene.over.push_back(
+            boxed(box, chrome.veil, chrome.legendEdge, hairline, Mark::Layer::Frame, s.radius));
+        const double left = box.x + s.gapM;
+        const double room = width - s.gapM * 2.0 - s.legendSwatch - s.gapS;
+        for (std::size_t i = 0; i < named; ++i) {
             LegendEntry& entry = scene.legend[i];
             const double middle = box.y + s.gapS + row * static_cast<double>(i) + row / 2.0;
-            entry.from = Point(box.x + s.gapS, middle);
-            entry.to = Point(box.x + s.gapS + swatch, middle);
-            entry.textAt = Point(box.x + s.gapS + swatch + s.gapS, middle);
-        }
-        scene.over.push_back(boxed(box, veil, chrome.axisRule, s.ruleWidth, Mark::Layer::Frame));
-        for (const LegendEntry& entry : scene.legend) {
-            scene.over.push_back(segment(entry.from, entry.to, entry.colour, 2.0 * s.lineWidth));
+            entry.from = Point(left, middle);
+            entry.to = Point(left + s.legendSwatch, middle);
+            entry.textAt = Point(left + s.legendSwatch + s.gapS, middle);
+            // A stroke of line rather than a block of colour, because what it
+            // stands for is a stroke.
+            scene.over.push_back(
+                boxed(PaneRect{left, middle - s.accentWidth / 2.0, s.legendSwatch, s.accentWidth},
+                      entry.colour, clear, 0.0, Mark::Layer::Frame, s.radius));
             TextItem name;
-            name.text = name.base = entry.name;
+            name.text = name.base = elided(entry.name, room, TextRole::Legend, true);
             name.at = entry.textAt;
             name.down = TextItem::Align::Middle;
             name.role = TextRole::Legend;
-            name.colour = chrome.ink;
+            name.colour = chrome.text;
             scene.over.push_back(written(std::move(name)));
+        }
+        scene.legend.resize(named);
+        if (unnamed > 0) {
+            TextItem more;
+            more.text = more.base = "+" + std::to_string(unnamed) + " more";
+            more.at = Point(left, box.y + s.gapS + row * static_cast<double>(named) + row / 2.0);
+            more.down = TextItem::Align::Middle;
+            more.role = TextRole::Note;
+            more.colour = chrome.faint;
+            scene.over.push_back(written(std::move(more)));
         }
     }
     else {
@@ -1292,43 +1318,57 @@ Scene Figure::compose(const SceneRequest& request)
     }
 
     // --- what the reading says, in the pane ------------------------------------
+    // For a host with nowhere else to say it: the viewer prints it in the bar
+    // under its plot and turns this off. On the veil the band's numbers stand
+    // on, and in their face.
     if (scene.reading.valid && settings_.readout) {
         TextItem said;
         said.text = said.base = "x " + scene.reading.xText + "   y " + scene.reading.yText;
-        said.at = Point(a.x + s.gapM + s.gapS, a.y + s.gapM + s.gapS);
         said.role = TextRole::Tick;
-        said.colour = chrome.ink;
-        const PaneRect ground{a.x + s.gapM, a.y + s.gapM,
-                              measure_.width(said.text, TextRole::Tick) + 2.0 * s.gapS,
-                              measure_.height(TextRole::Tick) + 2.0 * s.gapS};
-        scene.over.push_back(boxed(ground, veil, veil, 0.0, Mark::Layer::Overlay));
-        scene.over.push_back(written(std::move(said), Mark::Layer::Overlay));
+        said.colour = chrome.text;
+        const double width = std::ceil(measure_.width(said.text, TextRole::Tick)) + s.gapXS * 2.0;
+        const double height = std::ceil(measure_.height(TextRole::Tick)) + s.gapXS * 2.0;
+        const PaneRect ground{a.x + s.gapM, a.y + s.gapM, width, height};
+        said.at = Point(ground.x + width / 2.0, ground.y + height / 2.0);
+        said.across = TextItem::Align::Middle;
+        said.down = TextItem::Align::Middle;
+        scene.over.push_back(
+            boxed(ground, chrome.veil, clear, 0.0, Mark::Layer::Overlay, s.radius, true));
+        scene.over.push_back(written(std::move(said), Mark::Layer::Overlay, true));
     }
 
     // --- the band ------------------------------------------------------------------
     if (!request.picture && drag_ == Drag::Band) {
+        // The band is clamped to the pane rather than merely clipped, because
+        // its corners are what the numbers are read out of as well as what the
+        // rectangle is drawn from: the band, the numbers beside it and the
+        // window they get on release are one statement about one pair of
+        // points.
         const double left = std::clamp(std::min(pressed_.x(), last_.x()), a.x, a.x + a.width);
         const double right = std::clamp(std::max(pressed_.x(), last_.x()), a.x, a.x + a.width);
         const double topY = std::clamp(std::min(pressed_.y(), last_.y()), a.y, a.y + a.height);
         const double bottomY = std::clamp(std::max(pressed_.y(), last_.y()), a.y, a.y + a.height);
         scene.band = PaneRect{left, topY, right - left, bottomY - topY};
-        Rgba wash = chrome.cursorInk;
-        wash.alpha = 0.12;
-        Mark band = boxed(*scene.band, wash, chrome.cursorInk, s.ruleWidth, Mark::Layer::Overlay);
-        band.dashed = true;
-        scene.over.push_back(band);
+        scene.over.push_back(boxed(*scene.band, chrome.bandFill, chrome.bandEdge, s.accentWidth,
+                                   Mark::Layer::Overlay, 0.0, true));
+        if (settings_.bandReadout) {
+            bandReadout(scene, lay);
+        }
     }
 
     // --- why there is nothing to see ---------------------------------------------
     if (!scene.message.empty()) {
+        scene.messageTitle = "nothing on this scale";
+    }
+    if (!scene.message.empty() && settings_.paneMessage) {
         const std::vector<std::string> lines =
             wrapped(scene.message, std::max(1.0, a.width - 2.0 * s.gapL), TextRole::AxisName);
-        const double row = measure_.height(TextRole::AxisName);
-        const double top = a.y + a.height / 2.0 - row * static_cast<double>(lines.size()) / 2.0;
+        const double line = measure_.height(TextRole::AxisName);
+        const double top = a.y + a.height / 2.0 - line * static_cast<double>(lines.size()) / 2.0;
         for (std::size_t i = 0; i < lines.size(); ++i) {
             TextItem said;
             said.text = said.base = lines[i];
-            said.at = Point(a.x + a.width / 2.0, top + row * static_cast<double>(i));
+            said.at = Point(a.x + a.width / 2.0, top + line * static_cast<double>(i));
             said.across = TextItem::Align::Middle;
             said.role = TextRole::AxisName;
             said.colour = chrome.ink;
@@ -1336,6 +1376,295 @@ Scene Figure::compose(const SceneRequest& request)
         }
     }
     return scene;
+}
+
+void Figure::bandReadout(Scene& scene, const Layout& lay) const
+{
+    // PlotBand.qml. The band on its own says *where* the reader is about to
+    // look and nothing about *what* they are about to see. Somebody dragging
+    // one over the second half of a pulse is choosing an interval, and the
+    // interval is the thing they want written down: where the drag started,
+    // where it has reached, and how wide and how tall it has become by now.
+    // Those are the four numbers the axes are about to be set to.
+    //
+    // They are asked of the camera rather than worked out again -- dataXAt
+    // and dataYAt are what zoomToRegion resolves the band itself with. A
+    // second copy of that mapping would be a readout that can disagree with
+    // the window it names.
+    //
+    // Where the numbers go is the rest of this, and one rule carries it:
+    // **nothing is drawn over the band, over the pane's edge, over another
+    // number, or under the pointer.** A coordinate is drawn at the corner it
+    // names, pushed away from the band -- and past the cursor where that push
+    // would go under it, because the corner that follows the pointer is the
+    // one the reader is covering with their own hand. A length is drawn
+    // against its own edge only where there is room for one, and the two that
+    // measure the sides read along them. A length that does not fit is left
+    // out rather than squeezed in: the corners are the reading, the lengths
+    // are the subtraction between them, and the subtraction is what a crowded
+    // pane can afford to lose.
+    const FigureStyle& s = style_;
+    const Chrome chrome = chromeFor(settings_.dark, settings_.paper);
+    const PaneRect& a = lay.area;
+    const CameraAxis& cx = camera_.x;
+    const CameraAxis& cy = camera_.y;
+
+    // The band in the pane's own pixels, clamped as the zoom clamps.
+    const auto paneX = [&](double px) { return std::clamp(px - a.x, 0.0, a.width); };
+    const auto paneY = [&](double py) { return std::clamp(py - a.y, 0.0, a.height); };
+    const double startX = paneX(pressed_.x());
+    const double startY = paneY(pressed_.y());
+    const double endX = paneX(last_.x());
+    const double endY = paneY(last_.y());
+    const PaneRect bandRect{std::min(startX, endX), std::min(startY, endY), std::abs(endX - startX),
+                            std::abs(endY - startY)};
+
+    // ...and in the axes' own numbers. Both coordinates of each corner go to
+    // both questions, because on a flipped pane x is read off the height.
+    const double startValueX = camera_.dataXAt(pressed_.x(), pressed_.y());
+    const double startValueY = camera_.dataYAt(pressed_.y(), pressed_.x());
+    const double endValueX = camera_.dataXAt(last_.x(), last_.y());
+    const double endValueY = camera_.dataYAt(last_.y(), last_.x());
+    // Each number written by the axis it is on, which takes its decimals off
+    // the span on screen: so these say what the ticks beneath them say, to
+    // the same precision, and a reader zooming in is given digits as the
+    // ticks close up.
+    const auto xNumber = [&](double value) {
+        return axisLabel(value, cx.viewLow(), cx.viewHigh(), lay.xTicks.logarithmic);
+    };
+    const auto yNumber = [&](double value) {
+        return axisLabel(value, cy.viewLow(), cy.viewHigh(), lay.yTicks.logarithmic);
+    };
+    // A corner is two numbers and a comma -- only the x when there is no
+    // common y axis, whose y is a different number on every line's own.
+    const auto coordinate = [&](double x, double y) {
+        return lay.common ? xNumber(x) + ", " + yNumber(y) : xNumber(x);
+    };
+    // A length carries U+2206 INCREMENT, so a lone number against an edge
+    // does not read as one more coordinate -- and not U+0394, which the mono
+    // face the viewer ships does not carry.
+    const std::string increment = "\xE2\x88\x86";
+    const std::string startText = coordinate(startValueX, startValueY);
+    const std::string endText = coordinate(endValueX, endValueY);
+    const std::string xSpan = increment + xNumber(std::abs(endValueX - startValueX));
+    const std::string ySpan =
+        lay.common ? increment + yNumber(std::abs(endValueY - startValueY)) : std::string();
+    // The band's width is a length of whichever axis runs across the pane,
+    // which on a flipped one is y.
+    const std::string widthText = settings_.flipped ? ySpan : xSpan;
+    const std::string heightText = settings_.flipped ? xSpan : ySpan;
+
+    // The air between a number and whatever it is kept off: one distance for
+    // the band, the pane's edge and another number, because they are one rule.
+    const double gap = s.gapS;
+    const auto boxFor = [&](const std::string& text) {
+        return PaneRect{0.0, 0.0, std::ceil(measure_.width(text, TextRole::Tick)) + s.gapXS * 2.0,
+                        std::ceil(measure_.height(TextRole::Tick)) + s.gapXS * 2.0};
+    };
+    // Clear of one another with the gap between them -- a little more than
+    // not overlapping: two numbers a pixel apart read as one number twice as
+    // long. Satisfied exactly at the gap.
+    const auto clears = [&](const PaneRect& p, const PaneRect& q) {
+        return p.x + p.width + gap <= q.x || q.x + q.width + gap <= p.x ||
+               p.y + p.height + gap <= q.y || q.y + q.height + gap <= p.y;
+    };
+    const auto inside = [&](const PaneRect& box) {
+        return box.x >= 0.0 && box.y >= 0.0 && box.x + box.width <= a.width &&
+               box.y + box.height <= a.height;
+    };
+    // A cursor is drawn from its hotspot down and to the right, so a number
+    // in that quadrant is one the reader is covering with what they are
+    // pointing with -- the end corner, every time.
+    const PaneRect pointer{endX, endY, s.pointerSize, s.pointerSize};
+    const auto stands = [&](const PaneRect& box, std::initializer_list<PaneRect> avoid) {
+        if (!inside(box)) {
+            return false;
+        }
+        return std::all_of(avoid.begin(), avoid.end(),
+                           [&](const PaneRect& other) { return clears(box, other); });
+    };
+    const auto clampTo = [](double value, double size, double extent) {
+        return std::max(0.0, std::min(extent - size, value));
+    };
+    // A corner's number is pushed away from the band on both axes; where that
+    // push is into the pointer's quadrant it is a pointer's width and the gap.
+    // Four placements are tried in order and the first that stands clear is
+    // taken: the preferred one, the same sliding the other way, and the two
+    // that fold back over the corner -- which at the pane's edge is where one
+    // of the pushes has room. A band drawn into the corner of the pane leaves
+    // its own corner nowhere outside it to stand, and the number then stands
+    // on the band, which is a veil and not a cover.
+    const auto place = [&](double atX, double atY, double awayX, double awayY,
+                           const PaneRect& size) {
+        const double outX = awayX > 0.0 && awayY > 0.0 ? s.pointerSize + gap : gap;
+        const double wantX = awayX < 0.0 ? atX - gap - size.width : atX + outX;
+        const double wantY = awayY < 0.0 ? atY - gap - size.height : atY + gap;
+        const double backX = awayX < 0.0 ? atX + gap : atX - gap - size.width;
+        const double backY = awayY < 0.0 ? atY + gap : atY - gap - size.height;
+        const auto at = [&](double x, double y) { return PaneRect{x, y, size.width, size.height}; };
+        const PaneRect tries[] = {at(clampTo(wantX, size.width, a.width), wantY),
+                                  at(wantX, clampTo(wantY, size.height, a.height)),
+                                  at(clampTo(wantX, size.width, a.width), backY),
+                                  at(backX, clampTo(wantY, size.height, a.height))};
+        for (const PaneRect& tried : tries) {
+            if (stands(tried, {bandRect, pointer})) {
+                return tried;
+            }
+        }
+        return at(clampTo(wantX, size.width, a.width), clampTo(wantY, size.height, a.height));
+    };
+
+    struct Placed
+    {
+        BandLabel label;
+        PaneRect box;
+    };
+    std::vector<Placed> placed;
+    // Diagonally opposite corners, so the two pushes are exact opposites --
+    // which holds the two coordinates apart when the band is small enough
+    // that they would otherwise meet.
+    const double runsRight = endX >= startX ? 1.0 : -1.0;
+    const double runsDown = endY >= startY ? 1.0 : -1.0;
+    const PaneRect startBox = place(startX, startY, -runsRight, -runsDown, boxFor(startText));
+    const PaneRect endBox = place(endX, endY, runsRight, runsDown, boxFor(endText));
+    placed.push_back(Placed{BandLabel{"start", startText, {}, 0.0}, startBox});
+    placed.push_back(Placed{BandLabel{"end", endText, {}, 0.0}, endBox});
+
+    // The lengths, on both of the band's x lines and both of its y lines,
+    // because a reader measuring an edge is already looking at it -- offered
+    // only where one fits between the two corners it measures, and kept only
+    // where it is inside the pane and clear of the corners, which are placed
+    // first and never give way.
+    std::vector<Placed> candidates;
+    const PaneRect widthSize = boxFor(widthText);
+    const PaneRect written = boxFor(heightText);
+    // The height reads along the side it measures, turned the quarter the y
+    // axis's name is turned by -- and the two turned opposite ways, so each
+    // letter's top faces away from the band: a pair on either side of one
+    // rectangle reads as one when each is the other reflected. Turned, it
+    // costs a line's height beside the band and its length along it.
+    const PaneRect heightSize{0.0, 0.0, written.height, written.width};
+    const double midX = bandRect.x + bandRect.width / 2.0;
+    const double midY = bandRect.y + bandRect.height / 2.0;
+    if (!widthText.empty() && widthSize.width <= bandRect.width) {
+        candidates.push_back(
+            Placed{BandLabel{"widthAbove", widthText, {}, 0.0},
+                   PaneRect{midX - widthSize.width / 2.0, bandRect.y - gap - widthSize.height,
+                            widthSize.width, widthSize.height}});
+        candidates.push_back(
+            Placed{BandLabel{"widthBelow", widthText, {}, 0.0},
+                   PaneRect{midX - widthSize.width / 2.0, bandRect.y + bandRect.height + gap,
+                            widthSize.width, widthSize.height}});
+    }
+    if (!heightText.empty() && heightSize.height <= bandRect.height) {
+        candidates.push_back(
+            Placed{BandLabel{"heightLeft", heightText, {}, -90.0},
+                   PaneRect{bandRect.x - gap - heightSize.width, midY - heightSize.height / 2.0,
+                            heightSize.width, heightSize.height}});
+        candidates.push_back(
+            Placed{BandLabel{"heightRight", heightText, {}, 90.0},
+                   PaneRect{bandRect.x + bandRect.width + gap, midY - heightSize.height / 2.0,
+                            heightSize.width, heightSize.height}});
+    }
+    for (const Placed& candidate : candidates) {
+        if (inside(candidate.box) && clears(candidate.box, startBox) &&
+            clears(candidate.box, endBox)) {
+            placed.push_back(candidate);
+        }
+    }
+
+    // Drawn on the veil, in whole pixels: a line of ten-pixel type laid out
+    // on a half pixel is a line of blurred type.
+    for (Placed& one : placed) {
+        BandLabel label = one.label;
+        label.box = PaneRect{a.x + one.box.x, a.y + one.box.y, one.box.width, one.box.height};
+        const PaneRect drawn{a.x + jsRound(one.box.x), a.y + jsRound(one.box.y), one.box.width,
+                             one.box.height};
+        Mark ground;
+        ground.kind = Mark::Kind::Box;
+        ground.layer = Mark::Layer::Overlay;
+        ground.clipped = true;
+        ground.from = Point(drawn.x, drawn.y);
+        ground.to = Point(drawn.x + drawn.width, drawn.y + drawn.height);
+        ground.fill = chrome.veil;
+        ground.stroke = Rgba::of(0.0, 0.0, 0.0, 0.0);
+        ground.radius = s.radius;
+        scene.over.push_back(ground);
+        Mark text;
+        text.kind = Mark::Kind::Text;
+        text.layer = Mark::Layer::Overlay;
+        text.clipped = true;
+        text.text.text = text.text.base = label.text;
+        text.text.at = Point(drawn.x + drawn.width / 2.0, drawn.y + drawn.height / 2.0);
+        text.text.across = TextItem::Align::Middle;
+        text.text.down = TextItem::Align::Middle;
+        text.text.role = TextRole::Tick;
+        text.text.colour = chrome.text;
+        text.text.turn = label.turn;
+        text.text.raise = s.exponentRaise;
+        text.from = text.text.at;
+        scene.over.push_back(std::move(text));
+        scene.bandLabels.push_back(std::move(label));
+    }
+}
+
+namespace {
+
+/// A UTF-8 string cut into its code points, so an ellipsis is never put in the
+/// middle of one.
+std::vector<std::string> codePoints(const std::string& text)
+{
+    std::vector<std::string> points;
+    for (std::size_t i = 0; i < text.size();) {
+        const auto lead = static_cast<unsigned char>(text[i]);
+        const std::size_t length = lead < 0x80        ? 1
+                                   : lead >> 5 == 0x6 ? 2
+                                   : lead >> 4 == 0xE ? 3
+                                                      : 4;
+        points.push_back(text.substr(i, length));
+        i += length;
+    }
+    return points;
+}
+
+} // namespace
+
+std::string Figure::elided(const std::string& text, double width, TextRole role, bool middle) const
+{
+    if (measure_.width(text, role) <= width) {
+        return text;
+    }
+    // As many code points as fit with the ellipsis, from the start -- or half
+    // from each end, the start's half the larger, as Qt keeps a path's two
+    // ends.
+    const std::string ellipsis = "\xE2\x80\xA6";
+    const std::vector<std::string> points = codePoints(text);
+    const auto keep = [&](std::size_t count) {
+        std::string out;
+        const std::size_t front = middle ? (count + 1) / 2 : count;
+        for (std::size_t i = 0; i < front; ++i) {
+            out += points[i];
+        }
+        out += ellipsis;
+        if (middle) {
+            for (std::size_t i = points.size() - (count - front); i < points.size(); ++i) {
+                out += points[i];
+            }
+        }
+        return out;
+    };
+    std::size_t low = 0;
+    std::size_t high = points.size();
+    while (low < high) {
+        const std::size_t mid = (low + high + 1) / 2;
+        if (measure_.width(keep(mid), role) <= width) {
+            low = mid;
+        }
+        else {
+            high = mid - 1;
+        }
+    }
+    return keep(low);
 }
 
 std::vector<std::string> Figure::wrapped(const std::string& text, double width, TextRole role) const
@@ -1479,7 +1808,7 @@ void Figure::wheel(double px, double py, double angleDelta, Modifiers modifiers)
         return; // a pane explaining why it cannot draw takes no gestures
     }
     const double factor = std::pow(1.25, angleDelta / 120.0);
-    if (modifiers.alt && modifiers.control) {
+    if (modifiers.alt && modifiers.control && settings_.lineGestures) {
         const int line = lineAt(px, py);
         if (line >= 0) {
             scaleLine(line, settings_.flipped ? px : py, factor);
@@ -1508,12 +1837,13 @@ void Figure::press(double px, double py, Button button, Modifiers modifiers)
         drag_ = Drag::Band;
         return;
     }
-    if (button == Button::Middle || (button == Button::Left && modifiers.alt)) {
+    if (settings_.lineGestures &&
+        (button == Button::Middle || (button == Button::Left && modifiers.alt))) {
         dragLine_ = lineAt(px, py);
         drag_ = dragLine_ >= 0 ? Drag::Line : Drag::None;
         return;
     }
-    controlClick_ = modifiers.control;
+    controlClick_ = modifiers.control && settings_.lineGestures;
     drag_ = Drag::Pan;
 }
 
@@ -1630,6 +1960,9 @@ std::string Figure::state() const
         .set("markers", Value::of(settings_.markers))
         .set("cursor", Value::of(settings_.cursor))
         .set("readout", Value::of(settings_.readout))
+        .set("bandReadout", Value::of(settings_.bandReadout))
+        .set("paneMessage", Value::of(settings_.paneMessage))
+        .set("lineGestures", Value::of(settings_.lineGestures))
         .set("title", Value::of(settings_.title))
         .set("xLabel", Value::of(settings_.xLabel))
         .set("yLabel", Value::of(settings_.yLabel))
@@ -1667,6 +2000,9 @@ bool Figure::restore(const std::string& text)
     next.markers = root.boolOr("markers", next.markers);
     next.cursor = root.boolOr("cursor", next.cursor);
     next.readout = root.boolOr("readout", next.readout);
+    next.bandReadout = root.boolOr("bandReadout", next.bandReadout);
+    next.paneMessage = root.boolOr("paneMessage", next.paneMessage);
+    next.lineGestures = root.boolOr("lineGestures", next.lineGestures);
     next.title = root.textOr("title", next.title);
     next.xLabel = root.textOr("xLabel", next.xLabel);
     next.yLabel = root.textOr("yLabel", next.yLabel);

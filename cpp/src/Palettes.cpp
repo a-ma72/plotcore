@@ -17,10 +17,12 @@ namespace {
 
 // The neutral ramp, and the two signal colours paper has to answer for.
 constexpr std::string_view kN0 = "#000000";
+constexpr std::string_view kN3 = "#15181A";
 constexpr std::string_view kN4 = "#1D2124";
 constexpr std::string_view kN5 = "#282D31";
 constexpr std::string_view kN6 = "#3A4045";
 constexpr std::string_view kN7 = "#5A6268";
+constexpr std::string_view kN8 = "#8B959B";
 constexpr std::string_view kN9 = "#B9C2C7";
 constexpr std::string_view kN10 = "#E4E8EA";
 constexpr std::string_view kN11 = "#FFFFFF";
@@ -283,16 +285,53 @@ double seriesWidth(int series, int highlighted, double lineWidth)
 
 Chrome chromeFor(bool onDark, bool paper)
 {
+    Chrome chrome;
     if (paper) {
-        return Chrome{colourOf(kN11), colourOf(kN0), colourOf(kLineLight),
-                      colourOf(kN9),  colourOf(kN6), colourOf(kN0)};
+        // PlotPicture's publication overrides: the light scope, with the
+        // legend on the page itself rather than on a veil, ruled at the
+        // major rule's step and its count written at the axis's.
+        chrome = Chrome{colourOf(kN11),
+                        colourOf(kN0),
+                        colourOf(kLineLight),
+                        colourOf(kN9),
+                        colourOf(kN6),
+                        colourOf(kN0),
+                        colourOf(kN0),
+                        colourOf(kN6),
+                        Rgba::of(1.0, 1.0, 1.0, 0.0),
+                        colourOf(kN9),
+                        Rgba::of(0.0, 0.0, 0.0, 0.12),
+                        colourOf(kN0)};
     }
-    if (onDark) {
-        return Chrome{colourOf(kN0), colourOf(kN11), colourOf(kN4),
-                      colourOf(kN6), colourOf(kN9),  colourOf(kSig500)};
+    else if (onDark) {
+        chrome = Chrome{colourOf(kN0),
+                        colourOf(kN11),
+                        colourOf(kN4),
+                        colourOf(kN6),
+                        colourOf(kN9),
+                        colourOf(kSig500),
+                        colourOf(kN11),
+                        colourOf(kN8),
+                        Rgba::of(0.0, 0.0, 0.0, 0.78),
+                        colourOf(kN4),
+                        Rgba::of(1.0, 1.0, 1.0, 0.14),
+                        colourOf(kSig500)};
     }
-    return Chrome{colourOf(kN11), colourOf(kN0), colourOf(kLineLight),
-                  colourOf(kN9),  colourOf(kN6), colourOf(kN0)};
+    else {
+        chrome = Chrome{colourOf(kN11),
+                        colourOf(kN0),
+                        colourOf(kLineLight),
+                        colourOf(kN9),
+                        colourOf(kN6),
+                        colourOf(kN0),
+                        colourOf(kN3),
+                        colourOf(kN7),
+                        Rgba::of(1.0, 1.0, 1.0, 0.84),
+                        colourOf(kLineLight),
+                        Rgba::of(0.0, 0.0, 0.0, 0.12),
+                        colourOf(kN0)};
+    }
+    return chrome;
 }
 
 } // namespace plotcore

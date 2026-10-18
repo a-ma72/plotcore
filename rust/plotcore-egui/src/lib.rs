@@ -43,7 +43,7 @@ pub struct PlotView {
     last: Option<Scene>,
     held: Option<Button>,
     inside: bool,
-    measured: Option<[f32; 5]>,
+    measured: Option<[f32; ROLES]>,
     changed: bool,
 }
 
@@ -79,6 +79,9 @@ fn button(b: PointerButton) -> Option<Button> {
     }
 }
 
+/// How many faces a scene is set in.
+const ROLES: usize = TextRole::ALL.len();
+
 fn role_slot(role: TextRole) -> usize {
     TextRole::ALL.iter().position(|r| *r == role).unwrap_or(0)
 }
@@ -112,7 +115,7 @@ impl PlotView {
         FontId::proportional(self.figure.style(role.style_name()).unwrap_or(10.0) as f32)
     }
 
-    fn sizes(&self) -> [f32; 5] {
+    fn sizes(&self) -> [f32; ROLES] {
         TextRole::ALL.map(|role| self.font(role).size)
     }
 
@@ -230,7 +233,7 @@ fn pos(offset: Vec2, x: f64, y: f64) -> Pos2 {
     Pos2::new(x as f32, y as f32) + offset
 }
 
-fn draw_text(painter: &Painter, offset: Vec2, text: &Mark, fonts: &[FontId; 5]) {
+fn draw_text(painter: &Painter, offset: Vec2, text: &Mark, fonts: &[FontId; ROLES]) {
     let ink = colour(text.colour);
     let base = if text.base.is_empty() { text.text.clone() } else { text.base.clone() };
     let base = painter.layout_no_wrap(base, fonts[role_slot(text.role)].clone(), ink);
@@ -264,7 +267,13 @@ fn draw_text(painter: &Painter, offset: Vec2, text: &Mark, fonts: &[FontId; 5]) 
     }
 }
 
-fn paint_mark(painter: &Painter, pane: &Painter, offset: Vec2, mark: &Mark, fonts: &[FontId; 5]) {
+fn paint_mark(
+    painter: &Painter,
+    pane: &Painter,
+    offset: Vec2,
+    mark: &Mark,
+    fonts: &[FontId; ROLES],
+) {
     let painter = if mark.clipped { pane } else { painter };
     let edge = Stroke::new(mark.width as f32, colour(mark.stroke));
     let fill = colour(mark.fill);
@@ -280,14 +289,21 @@ fn paint_mark(painter: &Painter, pane: &Painter, offset: Vec2, mark: &Mark, font
             if mark.fill.alpha > 0.0 {
                 painter.rect_filled(r, corners, fill);
             }
+            // Filled to its bounds, and edged inside them.
             if mark.width > 0.0 {
                 if mark.dashed {
-                    let corners = [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom()];
-                    let path = [corners[0], corners[1], corners[2], corners[3], corners[0]];
+                    let inner = r.shrink(mark.width as f32 / 2.0);
+                    let path = [
+                        inner.left_top(),
+                        inner.right_top(),
+                        inner.right_bottom(),
+                        inner.left_bottom(),
+                        inner.left_top(),
+                    ];
                     let dash = 4.0 * mark.width as f32;
                     painter.extend(Shape::dashed_line(&path, edge, dash, dash));
                 } else {
-                    painter.rect_stroke(r, corners, edge, StrokeKind::Middle);
+                    painter.rect_stroke(r, corners, edge, StrokeKind::Inside);
                 }
             }
         }
@@ -311,7 +327,7 @@ pub fn paint_scene(
     painter: &Painter,
     offset: Vec2,
     scene: &Scene,
-    fonts: &[FontId; 5],
+    fonts: &[FontId; ROLES],
     strokes: Strokes,
 ) {
     let whole =

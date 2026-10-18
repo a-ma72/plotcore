@@ -180,12 +180,21 @@ struct Field
 };
 
 const Field<bool FigureSettings::*> kBools[] = {
-    {"xLog", &FigureSettings::xLog},       {"yLog", &FigureSettings::yLog},
-    {"flipped", &FigureSettings::flipped}, {"minorNumbers", &FigureSettings::minorNumbers},
-    {"markers", &FigureSettings::markers}, {"cursor", &FigureSettings::cursor},
-    {"legend", &FigureSettings::legend},   {"bundle", &FigureSettings::bundle},
-    {"dark", &FigureSettings::dark},       {"paper", &FigureSettings::paper},
-    {"stacked", &FigureSettings::stacked}, {"readout", &FigureSettings::readout},
+    {"xLog", &FigureSettings::xLog},
+    {"yLog", &FigureSettings::yLog},
+    {"flipped", &FigureSettings::flipped},
+    {"minorNumbers", &FigureSettings::minorNumbers},
+    {"markers", &FigureSettings::markers},
+    {"cursor", &FigureSettings::cursor},
+    {"legend", &FigureSettings::legend},
+    {"bundle", &FigureSettings::bundle},
+    {"dark", &FigureSettings::dark},
+    {"paper", &FigureSettings::paper},
+    {"stacked", &FigureSettings::stacked},
+    {"readout", &FigureSettings::readout},
+    {"bandReadout", &FigureSettings::bandReadout},
+    {"paneMessage", &FigureSettings::paneMessage},
+    {"lineGestures", &FigureSettings::lineGestures},
 };
 
 const Field<double FigureSettings::*> kNumbers[] = {
@@ -213,6 +222,7 @@ const Field<double FigureStyle::*> kStyle[] = {
     {"titlePixels", &FigureStyle::titlePixels},
     {"axisNamePixels", &FigureStyle::axisNamePixels},
     {"legendPixels", &FigureStyle::legendPixels},
+    {"notePixels", &FigureStyle::notePixels},
     {"gapXS", &FigureStyle::gapXS},
     {"gapS", &FigureStyle::gapS},
     {"gapM", &FigureStyle::gapM},
@@ -226,6 +236,9 @@ const Field<double FigureStyle::*> kStyle[] = {
     {"exponentRaise", &FigureStyle::exponentRaise},
     {"lineWidth", &FigureStyle::lineWidth},
     {"markerSize", &FigureStyle::markerSize},
+    {"radius", &FigureStyle::radius},
+    {"pointerSize", &FigureStyle::pointerSize},
+    {"legendSwatch", &FigureStyle::legendSwatch},
 };
 
 template<typename Member, std::size_t N>
@@ -817,6 +830,9 @@ plotcore_status plotcore_get_number(const plotcore_figure* figure, const char* n
     else if (key == "denseFactor") {
         answer = figure->figure.style().denseFactor;
     }
+    else if (key == "legendRows") {
+        answer = figure->figure.style().legendRows;
+    }
     else {
         return noSetting(name);
     }
@@ -1047,6 +1063,9 @@ plotcore_status plotcore_set_style(plotcore_figure* figure, const char* name, do
         }
         else if (key == "denseFactor") {
             style.denseFactor = std::max(1, static_cast<int>(value));
+        }
+        else if (key == "legendRows") {
+            style.legendRows = std::max(1, static_cast<int>(value));
         }
         else {
             return noSetting(name);
@@ -1378,6 +1397,11 @@ void plotcore_scene_view(const plotcore_scene* scene, double* x0, double* x1, do
 const char* plotcore_scene_message(const plotcore_scene* scene)
 {
     return scene != nullptr ? scene->scene.message.c_str() : "";
+}
+
+const char* plotcore_scene_message_title(const plotcore_scene* scene)
+{
+    return scene != nullptr ? scene->scene.messageTitle.c_str() : "";
 }
 
 int64_t plotcore_scene_line_count(const plotcore_scene* scene)

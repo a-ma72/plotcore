@@ -205,15 +205,18 @@ pub enum TextRole {
     Title,
     AxisName,
     Legend,
+    /// What is said in passing: the legend's count of the lines it leaves out.
+    Note,
 }
 
 impl TextRole {
-    pub const ALL: [TextRole; 5] = [
+    pub const ALL: [TextRole; 6] = [
         TextRole::Tick,
         TextRole::TickMinor,
         TextRole::Title,
         TextRole::AxisName,
         TextRole::Legend,
+        TextRole::Note,
     ];
 
     fn of(raw: i32) -> Self {
@@ -222,6 +225,7 @@ impl TextRole {
             sys::PLOTCORE_TEXT_TITLE => TextRole::Title,
             sys::PLOTCORE_TEXT_AXIS_NAME => TextRole::AxisName,
             sys::PLOTCORE_TEXT_LEGEND => TextRole::Legend,
+            sys::PLOTCORE_TEXT_NOTE => TextRole::Note,
             _ => TextRole::Tick,
         }
     }
@@ -234,6 +238,7 @@ impl TextRole {
             TextRole::Title => "titlePixels",
             TextRole::AxisName => "axisNamePixels",
             TextRole::Legend => "legendPixels",
+            TextRole::Note => "notePixels",
         }
     }
 }
@@ -462,6 +467,8 @@ pub struct Scene {
     /// x0, x1, y0, y1.
     pub view: [f64; 4],
     pub message: String,
+    /// The message in a few words.
+    pub message_title: String,
     /// Painted under the lines, in order: the grid.
     pub under: Vec<Mark>,
     /// The lines, clipped to `area`.
@@ -481,9 +488,9 @@ impl Scene {
         self.over.iter().filter(|mark| mark.kind == MarkKind::Text)
     }
 
-    /// The grid's rules.
+    /// The grid's rules: everything painted under the lines.
     pub fn rules(&self) -> impl Iterator<Item = &Mark> {
-        self.under.iter().filter(|mark| mark.kind == MarkKind::Segment)
+        self.under.iter()
     }
 }
 
@@ -576,6 +583,7 @@ unsafe fn copy_scene(scene: *const sys::plotcore_scene) -> Scene {
         let [x0, x1, y0, y1] = &mut out.view;
         sys::plotcore_scene_view(scene, x0, x1, y0, y1);
         out.message = text_of(sys::plotcore_scene_message(scene));
+        out.message_title = text_of(sys::plotcore_scene_message_title(scene));
         for index in 0..sys::plotcore_scene_line_count(scene) {
             let mut info = sys::plotcore_line_info::default();
             sys::plotcore_scene_line(scene, index, &mut info);

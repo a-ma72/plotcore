@@ -149,7 +149,12 @@ answered:
   toolkit's call; it decides nothing. The hosts used to draw the crosshair, the
   legend and the band themselves, and no two drew the same ones. A mark's
   *layer* (grid, frame, overlay) is for a host that draws some of it its own
-  way: matplotlib draws its own frame and paints the overlay. Three things are this layer's own, all from
+  way: matplotlib draws its own frame and paints the overlay. The picture is
+  **the viewer's, exactly** — its frame, its crosshair, PlotOverlayLegend's
+  legend and PlotBand's readout, `FigureStyle`'s defaults being Theme's — and
+  what a host may decline is a setting rather than a fork: `readout` (the
+  reading in the pane; the viewer prints it in its footer), `bandReadout`,
+  `paneMessage` (the viewer says it its own way) and `lineGestures`. Three things are this layer's own, all from
   jonassattler/H5Scope#30 and all about a line: **moved and scaled**
   (`LineSettings::scale`/`shift`, Alt-drag, Alt+Control+wheel, Control-click to
   put back), **stacked** in bands, and **a time per line**. A moved line stays

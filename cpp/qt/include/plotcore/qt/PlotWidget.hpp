@@ -81,8 +81,8 @@ private:
 
     Figure figure_;
     Scene scene_;
-    std::array<QFont, 5> fonts_;
-    std::array<bool, 5> fontSet_{};
+    std::array<QFont, 6> fonts_;
+    std::array<bool, 6> fontSet_{};
 };
 
 } // namespace plotcore::qt

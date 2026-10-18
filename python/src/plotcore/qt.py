@@ -95,6 +95,7 @@ class PlotWidget(QWidget):
             TextRole.TITLE: "titlePixels",
             TextRole.AXIS_NAME: "axisNamePixels",
             TextRole.LEGEND: "legendPixels",
+            TextRole.NOTE: "notePixels",
         }
         font.setPixelSize(max(1, round(self.figure.style[sizes[role]])))
         if role == TextRole.TITLE:
@@ -197,12 +198,18 @@ class PlotWidget(QWidget):
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
             painter.drawLine(QPointF(mark.x0, mark.y0), QPointF(mark.x1, mark.y1))
         elif mark.kind == MarkKind.BOX:
+            # Filled to its bounds, and edged inside them.
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, mark.radius > 0.0)
             box = QRectF(QPointF(mark.x0, mark.y0), QPointF(mark.x1, mark.y1))
-            if mark.radius > 0.0:
-                painter.drawRoundedRect(box, mark.radius, mark.radius)
-            else:
-                painter.drawRect(box)
+            edge = painter.pen()
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawRoundedRect(box, mark.radius, mark.radius)
+            if mark.width > 0.0:
+                half = mark.width / 2.0
+                radius = max(0.0, mark.radius - half)
+                painter.setPen(edge)
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawRoundedRect(box.adjusted(half, half, -half, -half), radius, radius)
         elif mark.kind == MarkKind.CIRCLE:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
             painter.drawEllipse(QPointF(mark.x0, mark.y0), mark.radius, mark.radius)
