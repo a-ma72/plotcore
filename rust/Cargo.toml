@@ -5,7 +5,7 @@
 # wrapper over it (plotcore), the same figure in egui (plotcore-egui), and an
 # example that walks every feature on one window (egui-demo).
 #
-# plotcore-sys compiles ../../src and ../../capi with the cc crate, so a crate
+# plotcore-sys compiles ../../cpp/src and ../../c with the cc crate, so a crate
 # here is built from this repository -- a git dependency checks the whole of
 # it out -- and publishing one would need those sources vendored into it,
 # which is not done.

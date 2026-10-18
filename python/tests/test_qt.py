@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import QApplication  # noqa: E402
 
 from plotcore.qt import PlotWidget  # noqa: E402
 
-EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "pyqt6" / "demo.py"
+EXAMPLE = Path(__file__).resolve().parents[1] / "pyqt6-demo" / "demo.py"
 
 
 def test_the_widget_paints_each_line_in_its_colour(qapp):

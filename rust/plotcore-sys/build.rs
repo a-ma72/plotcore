@@ -8,19 +8,19 @@
 use std::path::PathBuf;
 
 const SOURCES: &[&str] = &[
-    "src/Budget.cpp",
-    "src/Camera.cpp",
-    "src/Figure.cpp",
-    "src/Format.cpp",
-    "src/Json.cpp",
-    "src/Levels.cpp",
-    "src/Palettes.cpp",
-    "src/Parallel.cpp",
-    "src/Plot.cpp",
-    "src/Projection.cpp",
-    "src/Pyramid.cpp",
-    "src/Ticks.cpp",
-    "capi/plotcore.cpp",
+    "cpp/src/Budget.cpp",
+    "cpp/src/Camera.cpp",
+    "cpp/src/Figure.cpp",
+    "cpp/src/Format.cpp",
+    "cpp/src/Json.cpp",
+    "cpp/src/Levels.cpp",
+    "cpp/src/Palettes.cpp",
+    "cpp/src/Parallel.cpp",
+    "cpp/src/Plot.cpp",
+    "cpp/src/Projection.cpp",
+    "cpp/src/Pyramid.cpp",
+    "cpp/src/Ticks.cpp",
+    "c/plotcore.cpp",
 ];
 
 fn main() {
@@ -33,8 +33,8 @@ fn main() {
     build
         .cpp(true)
         .std("c++20")
-        .include(root.join("include"))
-        .include(root.join("capi"))
+        .include(root.join("cpp/include"))
+        .include(root.join("c"))
         .define("PLOTCORE_VERSION_STRING", Some(format!("\"{version}\"").as_str()))
         .warnings(false);
     if build.get_compiler().is_like_msvc() {
@@ -50,7 +50,7 @@ fn main() {
     let sizes = manifest.join("csrc/sizes.cpp");
     println!("cargo:rerun-if-changed={}", sizes.display());
     build.file(sizes);
-    for header in ["include/plotcore", "capi"] {
+    for header in ["cpp/include/plotcore", "c"] {
         println!("cargo:rerun-if-changed={}", root.join(header).display());
     }
     build.compile("plotcore");

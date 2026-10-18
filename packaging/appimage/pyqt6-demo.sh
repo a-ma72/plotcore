@@ -2,8 +2,8 @@
 # SPDX-FileCopyrightText: 2026 Jonas Sattler
 # SPDX-License-Identifier: GPL-3.0-only
 #
-# The PyQt6 example as an AppImage: a Python of its own with the wheel CI
-# tested, PyQt6 and matplotlib installed into it, and the example beside them.
+# The PyQt6 demo as an AppImage: a Python of its own with the wheel CI
+# tested, PyQt6 and matplotlib installed into it, and the demo beside them.
 #
 # The Python is python-build-standalone's, which is built to be moved: no
 # prefix compiled in, OpenSSL and the rest linked statically, glibc 2.17 the
@@ -47,11 +47,11 @@ python="$appdir/opt/python/bin/python3.12"
 # -I: nothing from the build machine's environment or user site decides what
 # goes in.
 "$python" -I -m pip install --no-cache-dir --no-warn-script-location --disable-pip-version-check \
-    -r "$appimage_packaging/appimage/pyqt6-requirements.txt" "$wheel"
+    -r "$appimage_root/python/pyqt6-demo/requirements.txt" "$wheel"
 
-install -Dm 644 "$appimage_root/examples/pyqt6/demo.py" \
+install -Dm 644 "$appimage_root/python/pyqt6-demo/demo.py" \
     "$appdir/usr/share/plotcore/pyqt6/demo.py"
-install -Dm 644 "$appimage_root/examples/pyqt6/signals.py" \
+install -Dm 644 "$appimage_root/python/pyqt6-demo/signals.py" \
     "$appdir/usr/share/plotcore/pyqt6/signals.py"
 
 cat > "$appdir/AppRun" <<'EOF'
@@ -60,7 +60,7 @@ cat > "$appdir/AppRun" <<'EOF'
 # SPDX-License-Identifier: GPL-3.0-only
 #
 # -I, so that a PYTHONPATH or a user site on the host cannot put a different
-# numpy or PyQt6 under the example than the one it was packed with.
+# numpy or PyQt6 under the demo than the one it was packed with.
 APPDIR="$(dirname "$(readlink -f "$0")")"
 export LD_LIBRARY_PATH="$APPDIR/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 exec "$APPDIR/opt/python/bin/python3.12" -I "$APPDIR/usr/share/plotcore/pyqt6/demo.py" "$@"

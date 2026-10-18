@@ -7,7 +7,7 @@
  * C interface, and Python's ctypes and Rust's FFI both read it as one. Two
  * halves. The first holds the interface to its own rules -- a status for every
  * failure, nothing borrowed, a context let go exactly once. The second runs
- * tests/golden/script.txt and writes down every scene it asks for, which is
+ * golden/script.txt and writes down every scene it asks for, which is
  * the digest the Python and Rust bindings are held to.
  *
  *     test_capi                              the contract

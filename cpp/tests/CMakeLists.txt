@@ -43,23 +43,3 @@ catch_discover_tests(test_plotlevels)
 add_executable(test_plotfigure test_plotfigure.cpp)
 target_link_libraries(test_plotfigure PRIVATE plotcore::core Catch2::Catch2WithMain)
 catch_discover_tests(test_plotfigure)
-
-# --- the C interface, from C ----------------------------------------------
-# Compiled as C, because a header only a C++ compiler accepts is no C
-# interface; and run over the golden script, whose digest the Python and Rust
-# bindings are held to (golden/README.md).
-if(PLOTCORE_BUILD_CAPI)
-  enable_language(C)
-  add_executable(test_capi test_capi.c)
-  set_target_properties(test_capi PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
-  target_link_libraries(test_capi PRIVATE plotcore::c)
-  if(NOT WIN32)
-    target_link_libraries(test_capi PRIVATE m)
-  endif()
-  add_test(NAME capi
-           COMMAND test_capi ${CMAKE_CURRENT_SOURCE_DIR}/golden/script.txt
-                             ${CMAKE_CURRENT_SOURCE_DIR}/golden/expected.txt)
-  # The library beside the test on Windows, where nothing else finds a DLL.
-  set_tests_properties(capi PROPERTIES ENVIRONMENT_MODIFICATION
-                       "PATH=path_list_prepend:$<TARGET_FILE_DIR:plotcore_c>")
-endif()

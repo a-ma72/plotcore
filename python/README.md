@@ -14,7 +14,7 @@ Python library.
 - **The same axes, gestures and colours.** They are the viewer's own, and its
   parity tests hold the two to each other.
 - **The same plot from Python, C++ and Rust.** All three libraries are one
-  plot. `tests/golden` is the script they all have to draw
+  plot. `golden` is the script they all have to draw
   identically.
 
 ```python
@@ -32,12 +32,12 @@ scene = figure.scene()             # strokes, rules and text, in pixels
 `plotcore.qt.PlotWidget` draws a figure in a PyQt6 widget (`pip install
 plotcore[qt]`). `plotcore.mpl` draws one on matplotlib's own axes, either
 once (`draw`) or live (`View`); install it with `pip install
-plotcore[matplotlib]`. `examples/pyqt6/demo.py` uses every feature
-on one window.
+plotcore[matplotlib]`. `python/pyqt6-demo/demo.py` in the repository uses
+every feature on one window.
 
 ## How it is built
 
-The package loads plotcore's C interface (`capi/plotcore.h`) with
+The package loads plotcore's C interface (`c/plotcore.h`) with
 ctypes. It links no Python, so one wheel per platform serves every Python 3.
 
 The wheel is built from the repository, because its CMake project is the

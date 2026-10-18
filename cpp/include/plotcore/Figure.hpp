@@ -15,7 +15,7 @@
 // y down. Every decision between those is plotcore's, so a plot drawn from Qt,
 // from Python and from Rust is the same plot: the same ticks at the same
 // places, the same gestures moving the same windows, the same line in the same
-// colour (tests/golden holds the three to one another).
+// colour (golden/ holds the three to one another).
 //
 // The viewer's rules hold here as they do there, because the arithmetic is the
 // viewer's -- Ticks.hpp and Camera.hpp are PlotFrame's and PlotSurface's,

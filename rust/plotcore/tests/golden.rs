@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Jonas Sattler
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! One plot in three languages: tests/golden/script.txt run through
+//! One plot in three languages: golden/script.txt run through
 //! the Rust binding must write the digest test_capi.c wrote from C. The
 //! language and the digest are golden/README.md's.
 
@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use plotcore::{Button, Figure, Modifiers, Rgba, Scene};
 
 fn golden() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/golden")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../golden")
 }
 
 /// A generator of README.md, and how many words it took.
