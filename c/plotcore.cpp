@@ -239,6 +239,7 @@ const Field<double FigureStyle::*> kStyle[] = {
     {"radius", &FigureStyle::radius},
     {"pointerSize", &FigureStyle::pointerSize},
     {"legendSwatch", &FigureStyle::legendSwatch},
+    {"dragDistance", &FigureStyle::dragDistance},
 };
 
 template<typename Member, std::size_t N>

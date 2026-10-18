@@ -1270,8 +1270,11 @@ TEST_CASE("a band being drawn writes its corners and its lengths, clear of every
     figure.move(to.x(), to.y(), {});
     const Scene scene = figure.scene();
     const Camera& camera = figure.camera();
-    const auto xNumber = [&](double v) { return axisLabel(v, scene.x.low, scene.x.high, false); };
-    const auto yNumber = [&](double v) { return axisLabel(v, scene.y.low, scene.y.high, false); };
+    // Written as the axes write their ticks, which is what the figure says
+    // when it is asked how it writes a position.
+    const auto xNumber = [&](double v) { return figure.xNumber(v); };
+    const auto yNumber = [&](double v) { return figure.yNumber(v); };
+    REQUIRE(figure.xNumber(1234.5) == axisLabel(1234.5, scene.x.low, scene.x.high, false));
     const auto labels = labelsOf(scene);
     REQUIRE(labels.size() == 6);
     // Both corners, as the axes read them, through the mapping the zoom
@@ -1389,4 +1392,29 @@ TEST_CASE("a host may keep a line from being moved on its own", "[figure]")
     REQUIRE(figure.lineSettings(0).shift == 0.0);
     figure.wheel(at.x(), at.y(), 240.0, Modifiers{false, true, true});
     REQUIRE(figure.lineSettings(0).scale == 1.0);
+}
+
+TEST_CASE("a band begins where the platform says a drag does", "[figure][band]")
+{
+    const std::vector<double> values = ramp(300, 10.0, 0.5);
+    Figure figure = figureOf({values});
+    const Scene first = figure.scene();
+    const Point at = sampleAt(first, 0, 150);
+    figure.hover(at.x(), at.y());
+    figure.press(at.x(), at.y(), Button::Right, {});
+    // Inside the drag distance a right press is not a band yet: nothing is
+    // drawn for it, and the crosshair goes on reading.
+    figure.move(at.x() + 6.0, at.y() + 6.0, {});
+    const Scene pressed = figure.scene();
+    REQUIRE_FALSE(pressed.band.has_value());
+    REQUIRE(pressed.reading.valid);
+    figure.move(at.x() + 40.0, at.y() + 3.0, {});
+    const Scene banding = figure.scene();
+    REQUIRE(banding.band.has_value());
+    REQUIRE_FALSE(banding.reading.valid);
+    // ...and it stays one if the pointer comes back.
+    figure.move(at.x() + 2.0, at.y() + 2.0, {});
+    REQUIRE(figure.scene().band.has_value());
+    figure.release(at.x() + 2.0, at.y() + 2.0, Button::Right, {});
+    REQUIRE_FALSE(figure.scene().band.has_value());
 }
