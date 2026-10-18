@@ -5,7 +5,7 @@
 #
 # The GitHub Actions Windows runner image sets core.autocrlf=true globally, so
 # without this every text file arrives in the working tree with CRLF endings.
-# Two things here would notice: tests/golden/expected.txt is compared line for
+# Two things here would notice: golden/expected.txt is compared line for
 # line by three test suites, and a shell script whose shebang ends in \r names
 # an interpreter that does not exist.
 #

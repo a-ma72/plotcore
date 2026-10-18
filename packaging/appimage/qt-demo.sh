@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2026 Jonas Sattler
 # SPDX-License-Identifier: GPL-3.0-only
 #
-# The Qt Widgets example as an AppImage.
+# The Qt Widgets demo as an AppImage.
 #
 # A prebuilt Qt is shared libraries and plugins, so unlike H5Scope's static
 # executable there is a deployment problem here, and linuxdeploy's Qt plugin
@@ -40,7 +40,7 @@ cmake -S "$appimage_root" -B "$build" \
     -DPLOTCORE_BUILD_CAPI=OFF \
     -DPLOTCORE_INSTALL=OFF
 cmake --build "$build" --target plotcore-qt-demo --parallel
-binary="$build/examples/qt/plotcore-qt-demo"
+binary="$build/cpp/qt-demo/plotcore-qt-demo"
 
 # linuxdeploy finds a plugin named linuxdeploy-plugin-<name>-<arch>.AppImage
 # beside itself.

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 
 build/
-# Where packaging/appimage writes, and where CI picks the AppImages up.
+# Where packaging/ writes, and where CI picks the demos up.
 dist/
 # Where a wheel is built to, locally and in CI.
 wheelhouse/

@@ -13,6 +13,13 @@
 # A project of its own, buildable with nothing but CMake and a C++20 compiler:
 # no vcpkg, no Qt, no HDF5. That is what lets the C++, Python and Rust
 # libraries built on it stand alone, and what CI holds it to.
+#
+# One directory per language, each with its library, its tests and its demo.
+# This project builds two of them: cpp/, the core and the Qt widget over it,
+# and c/, the C interface the other two are built on. python/ and rust/ are
+# built by their own tools, from c/ and from cpp/'s sources. What is decided
+# here is what all of them share: which parts are built, how, and what is
+# installed.
 
 cmake_minimum_required(VERSION 3.26)
 project(plotcore VERSION 0.1.0 LANGUAGES CXX)
@@ -27,10 +34,15 @@ option(PLOTCORE_BUILD_TESTS "Build plotcore's tests" ${PROJECT_IS_TOP_LEVEL})
 # that looks like a development package.
 option(PLOTCORE_INSTALL "Install plotcore's headers, library and CMake package"
        ${PROJECT_IS_TOP_LEVEL})
+# The C interface, which the Python and Rust libraries are built on. Off inside
+# the viewer, which links the C++ directly.
+option(PLOTCORE_BUILD_CAPI "Build plotcore_c, the C interface" ${PROJECT_IS_TOP_LEVEL})
+# The one part of this project that needs a toolkit, so off unless asked for.
+option(PLOTCORE_WITH_QT "Build plotcore::qt and its demo" OFF)
 
 # A wheel's library is loaded by whatever Python is on the machine, and Python
 # ships the C runtime but not the C++ one (MSVCP140.dll): so inside a wheel the
-# MSVC runtime is linked in, as -static-libstdc++ links libstdc++ in below. Not
+# MSVC runtime is linked in, as -static-libstdc++ links libstdc++ in in c/. Not
 # otherwise, because a static archive's runtime is its consumers' to match.
 if(SKBUILD AND MSVC)
   set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
@@ -49,115 +61,20 @@ endif()
 
 find_package(Threads REQUIRED)
 
-add_library(plotcore_core
-  src/Budget.cpp
-  src/Camera.cpp
-  src/Figure.cpp
-  src/Format.cpp
-  src/Json.cpp
-  src/Levels.cpp
-  src/Palettes.cpp
-  src/Parallel.cpp
-  src/Plot.cpp
-  src/Projection.cpp
-  src/Pyramid.cpp
-  src/Ticks.cpp
-)
-add_library(plotcore::core ALIAS plotcore_core)
-set_target_properties(plotcore_core PROPERTIES
-  EXPORT_NAME core
-  OUTPUT_NAME plotcore
-  # A static archive that a shared library -- the C interface, a Python
-  # module, a Rust crate -- can be linked into.
-  POSITION_INDEPENDENT_CODE ON
-)
-target_compile_features(plotcore_core PUBLIC cxx_std_20)
-target_include_directories(plotcore_core PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-)
-# The pool's threads. PUBLIC because a static archive's dependencies are its
-# user's to link.
-target_link_libraries(plotcore_core PUBLIC Threads::Threads)
-
-# --- the C interface ------------------------------------------------------
-# What the Python and Rust libraries are built on: plotcore::Figure behind a
-# C header, as one shared library that exports that header and nothing else.
-# Off inside the viewer, which links the C++ directly.
-option(PLOTCORE_BUILD_CAPI "Build plotcore_c, the C interface" ${PROJECT_IS_TOP_LEVEL})
-if(PLOTCORE_BUILD_CAPI)
-  add_library(plotcore_c SHARED capi/plotcore.cpp)
-  add_library(plotcore::c ALIAS plotcore_c)
-  set_target_properties(plotcore_c PROPERTIES
-    EXPORT_NAME c
-    CXX_VISIBILITY_PRESET hidden
-    VISIBILITY_INLINES_HIDDEN ON
-    PUBLIC_HEADER capi/plotcore.h
-  )
-  if(NOT SKBUILD)
-    # Versioned where it is installed as a library. Not inside a wheel, which
-    # is a zip: the two symlinks would go into it as two more copies.
-    set_target_properties(plotcore_c PROPERTIES
-      VERSION ${PROJECT_VERSION}
-      SOVERSION ${PROJECT_VERSION_MAJOR})
-  endif()
-  target_compile_definitions(plotcore_c PRIVATE
-    PLOTCORE_VERSION_STRING="${PROJECT_VERSION}")
-  target_include_directories(plotcore_c PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/capi>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-  )
-  target_link_libraries(plotcore_c PRIVATE plotcore::core)
-  if(NOT MSVC AND NOT APPLE)
-    # One file to hand to Python or Rust: the C++ runtime inside it rather
-    # than beside it, for the release floor's reason (CLAUDE.md, "The floor").
-    target_link_options(plotcore_c PRIVATE -static-libstdc++ -static-libgcc
-                        LINKER:--exclude-libs,ALL)
-  endif()
-endif()
-
 # Before anything that adds a test: enable_testing() only reaches the
-# directories added after it. The Qt example's self-test is added under
-# examples/qt, and was registered nowhere while this came after it -- H5Scope's
+# directories added after it. The Qt demo's self-test is added under
+# cpp/qt-demo, and was registered nowhere while this came after it -- H5Scope's
 # include(CTest), which runs before it adds this project, was hiding that.
 if(PLOTCORE_BUILD_TESTS)
   enable_testing()
 endif()
 
-# --- the Qt adapter -------------------------------------------------------
-# plotcore::Figure in a QWidget, and the example that walks every feature on
-# one. Off unless asked for, because it is the one part of this project that
-# needs a toolkit. CI builds it against a stock Qt on Linux and Windows, runs
-# the example's self-test, and packs the example as an AppImage.
-option(PLOTCORE_WITH_QT "Build plotcore::qt and its example" OFF)
-if(PLOTCORE_WITH_QT)
-  # GL resolved the way a prebuilt Qt's own libraries resolve it, to
-  # libGL.so.1. Qt's CMake package links every Widgets program against
-  # OpenGL::GL, which CMake's FindOpenGL otherwise resolves through glvnd to
-  # libOpenGL.so.0 and libGLX.so.0 -- which the example never calls, which no
-  # Qt library asks for, and which a stock RHEL 8 does not have
-  # (libglvnd-opengl): the AppImage stopped there before main(). --as-needed
-  # does not drop them, because they resolve Qt's own references to libGL.
-  if(NOT DEFINED OpenGL_GL_PREFERENCE)
-    set(OpenGL_GL_PREFERENCE LEGACY)
-  endif()
-  find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets)
-  add_library(plotcore_qt STATIC
-    qt/src/PlotWidget.cpp
-    qt/include/plotcore/qt/PlotWidget.hpp
-  )
-  add_library(plotcore::qt ALIAS plotcore_qt)
-  set_target_properties(plotcore_qt PROPERTIES EXPORT_NAME qt AUTOMOC ON)
-  target_include_directories(plotcore_qt PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/qt/include>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
-  )
-  target_link_libraries(plotcore_qt PUBLIC plotcore::core Qt6::Widgets)
-  add_subdirectory(examples/qt)
-endif()
+# plotcore::core, plotcore::qt and the Qt demo, and their tests.
+add_subdirectory(cpp)
 
-if(PLOTCORE_BUILD_TESTS)
-  add_subdirectory(tests)
+# plotcore::c and its test, which is also what writes golden/expected.txt.
+if(PLOTCORE_BUILD_CAPI)
+  add_subdirectory(c)
 endif()
 
 # --- a Python wheel ---------------------------------------------------------
@@ -186,7 +103,7 @@ if(PLOTCORE_INSTALL)
             RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
             PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
   endif()
-  install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+  install(DIRECTORY cpp/include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
   install(EXPORT plotcoreTargets NAMESPACE plotcore::
           DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/plotcore)
   configure_package_config_file(cmake/plotcoreConfig.cmake.in

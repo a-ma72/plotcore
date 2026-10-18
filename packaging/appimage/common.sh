@@ -15,7 +15,7 @@
 # image the wheel is built in, so that it starts on RHEL 8 like H5Scope does.
 # An AppImage carries libraries, not a loader: what is inside it still has to
 # have been built against a glibc no newer than the host's, and
-# tools/check-floor.sh is what says so.
+# check-floor.sh is what says so.
 
 set -euo pipefail
 

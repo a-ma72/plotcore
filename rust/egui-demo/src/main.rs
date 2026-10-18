@@ -11,6 +11,11 @@
 //! figure is the one place a setting lives -- the immediate-mode way of what
 //! the Qt examples do with signals.
 
+// A window and nothing else when the release build is opened on Windows, as
+// the Qt demos are: without this a console opens beside it. --self-test then
+// writes only where its output is piped or redirected, as theirs does.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 mod signals;
 
 use std::f64::consts::E;

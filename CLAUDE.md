@@ -1,8 +1,9 @@
 # plotcore — working notes for Claude
 
 The plot H5Scope draws, as a library: C++20 with no dependencies, a C
-interface over it, and Python and Rust libraries over that, each with an
-example that walks every feature. GPL-3.0-only.
+interface over it, and Python and Rust libraries over that. One directory per
+language, each holding its library, its tests and a demo that walks every
+feature. GPL-3.0-only.
 
 "The viewer" everywhere in this repository is
 [H5Scope](https://github.com/jonassattler/H5Scope), which pins this repository
@@ -25,7 +26,7 @@ ctest --test-dir build --output-on-failure
 ```
 
 - `-DPLOTCORE_WITH_QT=ON -DCMAKE_PREFIX_PATH=<qt>` adds the widget and the Qt
-  example, whose `--self-test` is the `plotcore_qt_demo` ctest test; run it
+  demo, whose `--self-test` is the `plotcore_qt_demo` ctest test; run it
   with `QT_QPA_PLATFORM=offscreen`.
 - **Python:** `pip install ./python` builds the wheel (scikit-build-core, from
   the CMake project one directory up), then `pytest python/tests` from
@@ -34,27 +35,34 @@ ctest --test-dir build --output-on-failure
 - **Rust:** in `rust/`, `cargo fmt --all --check`,
   `cargo clippy --workspace --all-targets --locked -- -D warnings`,
   `cargo test --workspace --locked`. CI runs exactly those three.
-- **AppImages:** `packaging/appimage/{qt,egui,pyqt6}-demo.sh` build one each and
-  `verify.sh` checks one. They run anywhere, but only hold the RHEL 8 floor
-  when run inside manylinux_2_28, which is what `in-container.sh` is for. Off a
-  floor-sized machine, `verify.sh` fails on the floor and nothing else.
+- **Demo packages:** `packaging/appimage/{qt,egui,pyqt6}-demo.sh` build one
+  AppImage each and `verify.sh` checks one. They run anywhere, but only hold
+  the RHEL 8 floor when run inside manylinux_2_28, which is what
+  `in-container.sh` is for. Off a floor-sized machine, `verify.sh` fails on the
+  floor and nothing else. `packaging/windows/{qt,egui,pyqt6}-demo.ps1` build
+  one Windows folder each and `verify.ps1` checks one; they need Windows.
 
-CI is `.github/workflows/ci.yml`: C++ and C, the Qt example, Python and Rust on
-Linux and Windows, then the AppImages. It builds, tests and uploads artefacts;
+CI is `.github/workflows/ci.yml`: C++ and C, the Qt widget, Python and Rust,
+each built and tested on Linux and Windows; then every demo packaged for both,
+one artefact per demo per platform. It builds, tests and uploads artefacts;
 it publishes nothing.
 
 ## Layout
 
+One directory per language, each with its library, its tests and its demo.
+The root `CMakeLists.txt` says what is built and installed; `cpp/` and `c/`
+each define their own targets.
+
 | Path | What it is |
 |---|---|
-| `include/plotcore/`, `src/` | `plotcore::core`. The arithmetic: `Projection` (where a sample lands, gaps, the thinning, strokes as triangles), `Levels` (the fold and the policy over held runs), `Pyramid` (what every run is folded out of), `Budget` (what may be held), `Parallel` (the pool a large fold is spread over). The frame: `Format`, `Ticks`, `Camera`, `Palettes`. Then `Plot` (lines held) and `Figure` (the whole plot a host drives). `src/Json.*` is private. |
-| `capi/` | `plotcore.h`, `Figure` as C, built as `plotcore_c`. |
-| `qt/` | `plotcore::qt`, a `QWidget` over a `Figure`. |
-| `python/` | The package (`src/plotcore`: `_native.py`, `figure.py`, `scene.py`, `qt.py`, `mpl.py`) and its tests. |
+| `cpp/include/plotcore/`, `cpp/src/` | `plotcore::core`. The arithmetic: `Projection` (where a sample lands, gaps, the thinning, strokes as triangles), `Levels` (the fold and the policy over held runs), `Pyramid` (what every run is folded out of), `Budget` (what may be held), `Parallel` (the pool a large fold is spread over). The frame: `Format`, `Ticks`, `Camera`, `Palettes`. Then `Plot` (lines held) and `Figure` (the whole plot a host drives). `cpp/src/Json.*` is private. |
+| `cpp/tests/` | The Catch2 suites: `test_plotprojection`, `test_plotlevels`, `test_plotfigure`. |
+| `cpp/qt/`, `cpp/qt-demo/` | `plotcore::qt`, a `QWidget` over a `Figure`, and the Qt demo. |
+| `c/` | `plotcore.h`, `Figure` as C, built as `plotcore_c`, and `tests/test_capi.c`. |
+| `python/` | The package (`src/plotcore`: `_native.py`, `figure.py`, `scene.py`, `qt.py`, `mpl.py`), its tests, and `pyqt6-demo/` with the demo's pinned `requirements.txt`. |
 | `rust/` | `plotcore-sys`, `plotcore`, `plotcore-egui`, `egui-demo`. |
-| `examples/` | `qt/` and `pyqt6/`. |
-| `tests/` | Catch2 suites (`test_plotprojection`, `test_plotlevels`, `test_plotfigure`), `test_capi.c`, and `golden/`. |
-| `packaging/` | The icon, and `appimage/`. |
+| `golden/` | The script the C, Python and Rust tests all run, and its digest. |
+| `packaging/` | The icon; `appimage/`, the demos for Linux; `windows/`, the demos for Windows. |
 
 ## plotcore and H5Scope
 
@@ -105,23 +113,23 @@ answered:
   the pane on the first pixel of a drag widened the gutter and moved every x
   under the pointer — and only a line on an axis of its own, or stacked, is
   numbered beside the pane. `state()`/`restore()` write a view as JSON
-  (`src/Json.*`), passing over what they cannot read as the viewer's saved
+  (`cpp/src/Json.*`), passing over what they cannot read as the viewer's saved
   views do.
-- **`capi/plotcore.h`** is `Figure` as C, built as one shared library
+- **`c/plotcore.h`** is `Figure` as C, built as one shared library
   (`plotcore_c`, exporting nothing else, its C++ runtime linked in). Settings
   are **named, not laid out** — `plotcore_set_bool(f, "xLog", 1)`, the names a
   saved view writes — so a new setting is a new name and not a new ABI.
   Nothing is borrowed across it, every failure is a status with
   `plotcore_last_error()` beside it, and `test_capi.c` is compiled as C.
 
-`tests/golden/` is what holds the three languages to one plot: a script of
+`golden/` is what holds the three languages to one plot: a script of
 settings and gestures, and the digest of every scene it asks for. `test_capi`
 writes it (`--write`) and checks it; the Python and Rust tests check the same
 file through their own bindings. **A changed line in `expected.txt` is a
 changed picture**, so read the diff before committing one.
 
-`qt/` is a `QWidget` over a `Figure`, and `examples/qt` walks every feature on
-one window; `--self-test` walks them itself offscreen.
+`cpp/qt/` is a `QWidget` over a `Figure`, and `cpp/qt-demo` walks every
+feature on one window; `--self-test` walks them itself offscreen.
 
 `python/` is ctypes over the C interface (`_native.py` declares the header line
 for line and checks the ABI version before anything is called), so it links no
@@ -135,10 +143,10 @@ token the C side holds**, released when the C side says it has let go of it,
 which is the only moment index bookkeeping in Python could not get wrong.
 `plotcore.qt` is the PyQt6 widget, `plotcore.mpl` draws on matplotlib's own
 axes from each run's data-unit values (`plotcore_scene_line_run_values`) with
-the figure's gestures under them, and `examples/pyqt6/demo.py --self-test` is
-the Qt example's walk, run by `python/tests/test_qt.py`.
+the figure's gestures under them, and `python/pyqt6-demo/demo.py --self-test`
+is the Qt demo's walk, run by `python/tests/test_qt.py`.
 
-`rust/` is the workspace: `plotcore-sys` compiles `src/` and `capi/` with the
+`rust/` is the workspace: `plotcore-sys` compiles `cpp/src/` and `c/` with the
 `cc` crate and declares the header by hand (no libclang), and its test holds
 every structure's size to what the C compiler that built the library makes of
 it, because working them out by hand got two of them wrong; `plotcore` is the
@@ -147,8 +155,8 @@ as contexts it gives back; `plotcore-egui` paints a scene as plotcore's
 triangles or as feathered polylines and hands egui's raw input events over as
 gestures; `egui-demo` walks every feature, and its `--self-test` drives egui
 headless, so `cargo test` needs no display. Because `plotcore-sys` reaches
-`../../src`, a crate is built from this repository and is not publishable as it
-stands.
+`../../cpp/src`, a crate is built from this repository and is not publishable
+as it stands.
 
 ## The floor
 
@@ -171,6 +179,27 @@ H5Scope does, and it is held in three places:
   the Wayland client, fontconfig — and linuxdeploy's own list is overruled by
   it. libxcb-cursor is the library both Qt images exist to carry: Qt 6.5 and
   newer link the xcb plugin against it, and RHEL 8 has it only in EPEL.
+
+## The demos on Windows
+
+Each is a folder, `plotcore-<toolkit>-demo`, that starts on a Windows with
+nothing installed — the AppImage's claim, made by different means:
+
+- **Qt:** `windeployqt` beside the executable, plus what it leaves out — the
+  offscreen platform plugin, without which `--self-test` stops on a message
+  box that nothing on a runner dismisses, and the Visual C++ runtime.
+- **egui:** `+crt-static`, which the `cc` crate reads too and so compiles
+  plotcore with `/MT`: one executable that needs nothing beside it. Release
+  builds are a Windows-subsystem program, so no console opens beside it.
+- **PyQt6:** PyInstaller, around the wheel CI tested and the same pins as the
+  AppImage (`python/pyqt6-demo/requirements.txt`). `--collect-binaries
+  plotcore` is what brings the C library, which no import names.
+
+The runner has the Visual C++ redistributable installed, so a bundle that is
+missing it still starts there. `verify.ps1` therefore reads every import in
+the folder with `dumpbin` and fails on a runtime DLL the folder does not
+carry, before it runs the self-test with Qt, Python and the toolchains off
+the `PATH`.
 
 ## Conventions
 

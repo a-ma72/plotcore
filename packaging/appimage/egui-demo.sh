@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: 2026 Jonas Sattler
 # SPDX-License-Identifier: GPL-3.0-only
 #
-# The egui example as an AppImage.
+# The egui demo as an AppImage.
 #
 # The smallest of the three. Rust links its own code statically and plotcore's
 # C++ through plotcore-sys, so the executable asks the host for glibc and the

@@ -139,14 +139,12 @@ jobs:
           name: plotcore-sdk-${{ runner.os }}
           path: ${{ runner.temp }}/plotcore
 
-  # The Qt adapter and the example that walks every feature on it, against
-  # the Qt the AppImage carries -- 6.8, the last whose Linux binaries need no
-  # more than glibc 2.28 -- and its self-test run offscreen by ctest. On
-  # Windows the example is then deployed beside the Qt it needs and run again
-  # from there with Qt off the PATH, so that what is uploaded is what was
-  # seen to start.
+  # The Qt widget and the demo that walks every feature on it, against the Qt
+  # both demo packages carry -- 6.8, the last whose Linux binaries need no
+  # more than glibc 2.28 -- and the demo's self-test run offscreen by ctest.
+  # The demo is packaged below, by linux-demos and windows-demos.
   qt:
-    name: Qt example (${{ matrix.os }})
+    name: Qt widget (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -172,54 +170,14 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: ctest --test-dir build/qt -C Release --output-on-failure --parallel 4
 
-      - name: Deploy the example beside its Qt
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $out = "plotcore-qt-demo"
-          New-Item -ItemType Directory -Force $out | Out-Null
-          Copy-Item build/qt/examples/qt/Release/plotcore-qt-demo.exe $out
-          windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw "$out/plotcore-qt-demo.exe"
-          # windeployqt deploys the windows platform plugin and no other, and
-          # --self-test runs offscreen. Without it Qt says so in a message box,
-          # which nobody on a runner dismisses.
-          Copy-Item "$env:QT_ROOT_DIR/plugins/platforms/qoffscreen.dll" "$out/platforms/"
-          # The C++ runtime Qt and the example were built against: a machine
-          # without the Visual C++ redistributable has none of it.
-          $vswhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
-          $crt = & $vswhere -latest -find "VC/Redist/MSVC/*/x64/Microsoft.VC*.CRT" | Select-Object -Last 1
-          Copy-Item "$crt/*.dll" $out
-          Copy-Item LICENSE $out
-          Get-ChildItem $out -Name
-
-      # A missing DLL is a message box on Windows rather than an exit code, so
-      # a broken deployment hangs here instead of failing.
-      - name: The deployed example starts on its own
-        if: runner.os == 'Windows'
-        timeout-minutes: 5
-        shell: pwsh
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: |
-          $env:PATH = "$env:SystemRoot\system32;$env:SystemRoot"
-          Remove-Item Env:QT_PLUGIN_PATH -ErrorAction SilentlyContinue
-          ./plotcore-qt-demo/plotcore-qt-demo.exe --self-test | Select-Object -Last 1
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - uses: actions/upload-artifact@v7
-        if: runner.os == 'Windows'
-        with:
-          name: plotcore-qt-demo-Windows
-          path: plotcore-qt-demo
-
   # plotcore for Python: the wheel built as it would be shipped -- on Linux in
   # the manylinux_2_28 image, which is the RHEL 8 floor's glibc, and repaired
   # to that tag -- then installed on a plain runner and tested, PyQt6 and
   # matplotlib included, against the golden digest the C test wrote. Uploaded
-  # as an artefact beside the PyQt6 example, and published nowhere; the
-  # Linux one is also what the PyQt6 demo's AppImage carries.
+  # as an artefact and published nowhere; it is also what both of the PyQt6
+  # demo's packages carry.
   python:
-    name: plotcore for Python (${{ matrix.os }})
+    name: Python (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -269,17 +227,16 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: plotcore-python-${{ runner.os }}
-          path: |
-            wheelhouse/*.whl
-            examples/pyqt6/*.py
+          path: wheelhouse/*.whl
+          if-no-files-found: error
 
   # plotcore for Rust: the workspace at the toolchain rust-toolchain.toml pins,
   # formatted, linted with warnings as errors, and tested -- the golden digest,
-  # the egui adapter driven headless, and the example's walk of every feature,
-  # which needs no display because it drives egui without a window. The
-  # example is uploaded from Windows; Linux gets it as an AppImage below.
+  # the egui adapter driven headless, and the demo's walk of every feature,
+  # which needs no display because it drives egui without a window. The demo
+  # is packaged below, by linux-demos and windows-demos.
   rust:
-    name: plotcore for Rust (${{ matrix.os }})
+    name: Rust (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -313,25 +270,14 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked
 
-
-      - name: Build the example
-        if: runner.os == 'Windows'
-        run: cargo build --release --locked -p egui-demo
-
-      - uses: actions/upload-artifact@v7
-        if: runner.os == 'Windows'
-        with:
-          name: plotcore-egui-demo-Windows
-          path: rust/target/release/egui-demo.exe
-
-  # All three examples as AppImages at H5Scope's floor, RHEL 8. Built and
-  # checked inside manylinux_2_28 (AlmaLinux 8) by packaging/appimage, the
+  # The three demos for Linux, as AppImages at H5Scope's floor, RHEL 8. Built
+  # and checked inside manylinux_2_28 (AlmaLinux 8) by packaging/appimage, the
   # PyQt6 one around the wheel the job above tested; then each self-test run
   # again on a stock AlmaLinux 8 under X11 -- no EPEL, so nothing the images
   # say they carry can be on the host by accident -- and on this runner's
-  # Ubuntu, offscreen.
-  appimages:
-    name: Demo AppImages (RHEL 8 floor)
+  # Ubuntu, offscreen. One artefact per demo.
+  linux-demos:
+    name: Demos for Linux (AppImage, RHEL 8 floor)
     runs-on: ubuntu-latest
     needs: python
     steps:
@@ -340,11 +286,11 @@ jobs:
       - uses: actions/download-artifact@v7
         with:
           name: plotcore-python-Linux
-          path: python-artifact
+          path: wheel
 
       - name: Build and check them in manylinux_2_28
         run: |
-          wheel="$(ls python-artifact/wheelhouse/plotcore-*.whl)"
+          wheel="$(ls wheel/plotcore-*.whl)"
           docker run --rm -v "$PWD:/io" -w /io quay.io/pypa/manylinux_2_28_x86_64 \
             bash packaging/appimage/in-container.sh "$wheel" dist
 
@@ -368,5 +314,84 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: plotcore-demos-AppImage
-          path: dist/*.AppImage
+          name: plotcore-qt-demo-Linux
+          path: dist/plotcore-qt-demo-*.AppImage
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: plotcore-egui-demo-Linux
+          path: dist/plotcore-egui-demo-*.AppImage
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: plotcore-pyqt6-demo-Linux
+          path: dist/plotcore-pyqt6-demo-*.AppImage
+          if-no-files-found: error
+
+  # The three demos for Windows, each a folder that starts on a Windows with
+  # nothing installed, built by packaging/windows -- the Qt one beside the Qt
+  # it was built on, the egui one alone, the PyQt6 one frozen around the wheel
+  # the job above tested. verify.ps1 then reads every import in the folder
+  # for a C++ runtime it does not carry, which the runner would otherwise
+  # hide, and runs the self-test from the folder with Qt, Python and the
+  # toolchains off the PATH. One artefact per demo.
+  windows-demos:
+    name: ${{ matrix.demo }} demo for Windows
+    runs-on: windows-latest
+    needs: python
+    strategy:
+      fail-fast: false
+      matrix:
+        demo: [qt, egui, pyqt6]
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: jurplel/install-qt-action@v4.4.1
+        if: matrix.demo == 'qt'
+        with:
+          version: "6.8.3"
+          aqtversion: "==3.3.0"
+          cache: true
+
+      # With no name, rustup installs the one rust-toolchain.toml pins.
+      - name: Toolchain
+        if: matrix.demo == 'egui'
+        working-directory: rust
+        run: rustup toolchain install
+
+      - uses: actions/setup-python@v6
+        if: matrix.demo == 'pyqt6'
+        with:
+          python-version: "3.12"
+
+      - uses: actions/download-artifact@v7
+        if: matrix.demo == 'pyqt6'
+        with:
+          name: plotcore-python-Windows
+          path: wheel
+
+      - name: Build it
+        run: |
+          switch ('${{ matrix.demo }}') {
+            'qt'    { ./packaging/windows/qt-demo.ps1 $env:QT_ROOT_DIR dist }
+            'egui'  { ./packaging/windows/egui-demo.ps1 dist }
+            'pyqt6' { ./packaging/windows/pyqt6-demo.ps1 (Get-Item wheel/plotcore-*.whl).FullName dist }
+          }
+
+      # A missing DLL is a message box on Windows rather than an exit code, so
+      # a broken bundle hangs here instead of failing. Ten minutes, because
+      # the PyQt6 one reads the imports of some hundreds of files first.
+      - name: Check it
+        timeout-minutes: 10
+        run: ./packaging/windows/verify.ps1 dist/plotcore-${{ matrix.demo }}-demo
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: plotcore-${{ matrix.demo }}-demo-Windows
+          path: dist/plotcore-${{ matrix.demo }}-demo
+          if-no-files-found: error
