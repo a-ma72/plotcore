@@ -211,13 +211,18 @@ void PlotWidget::paintMark(QPainter& painter, const Mark& mark, const QRectF& ar
         painter.drawLine(qpoint(mark.from), qpoint(mark.to));
         break;
     case Mark::Kind::Box: {
+        // Filled to its bounds, and edged inside them.
         const QRectF box(qpoint(mark.from), qpoint(mark.to));
         painter.setRenderHint(QPainter::Antialiasing, mark.radius > 0.0);
-        if (mark.radius > 0.0) {
-            painter.drawRoundedRect(box, mark.radius, mark.radius);
-        }
-        else {
-            painter.drawRect(box);
+        const QPen edge = painter.pen();
+        painter.setPen(Qt::NoPen);
+        painter.drawRoundedRect(box, mark.radius, mark.radius);
+        if (mark.width > 0.0) {
+            const double half = mark.width / 2.0;
+            const double radius = std::max(0.0, mark.radius - half);
+            painter.setPen(edge);
+            painter.setBrush(Qt::NoBrush);
+            painter.drawRoundedRect(box.adjusted(half, half, -half, -half), radius, radius);
         }
         break;
     }

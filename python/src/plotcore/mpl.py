@@ -176,6 +176,7 @@ _ROLES = {
     TextRole.TITLE: "titlePixels",
     TextRole.AXIS_NAME: "axisNamePixels",
     TextRole.LEGEND: "legendPixels",
+    TextRole.NOTE: "notePixels",
 }
 _ACROSS = {Align.START: "left", Align.MIDDLE: "center", Align.END: "right"}
 _DOWN = {Align.START: "top", Align.MIDDLE: "center", Align.END: "bottom"}
@@ -202,7 +203,10 @@ def _overlay(figure: Figure, scene: Scene, ax) -> None:
                     alpha=mark.stroke[3], linewidth=mark.width * points,
                     clip_on=mark.clipped, zorder=order)
         elif mark.kind == MarkKind.BOX:
-            (left, top), (right, bottom) = at(mark.x0, mark.y0), at(mark.x1, mark.y1)
+            # Edged inside its bounds: the edge's line is half its width in.
+            half = mark.width / 2.0
+            (left, top), (right, bottom) = (at(mark.x0 + half, mark.y0 + half),
+                                            at(mark.x1 - half, mark.y1 - half))
             ax.add_patch(Rectangle(
                 (left, bottom), right - left, top - bottom, transform=ax.transAxes,
                 facecolor=mark.fill if mark.fill[3] > 0 else "none",

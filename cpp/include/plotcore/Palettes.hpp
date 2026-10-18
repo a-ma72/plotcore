@@ -95,7 +95,9 @@ struct LineColours
 [[nodiscard]] double seriesWidth(int series, int highlighted, double lineWidth = 1.0);
 
 /// What the picture around the lines is drawn in. `PlotFrame`'s six colour
-/// properties, with their Theme defaults and their paper overrides.
+/// properties, with their Theme defaults and their paper overrides -- and
+/// then what PlotOverlayLegend and PlotBand are drawn in, with PlotPicture's
+/// overrides of the legend's for paper.
 struct Chrome
 {
     Rgba ground;
@@ -104,6 +106,22 @@ struct Chrome
     Rgba ruleMajor;
     Rgba axisRule;
     Rgba cursorInk;
+    /// What is written on a veil: the legend's names and the band's numbers.
+    /// Theme.textPrimary.
+    Rgba text;
+    /// What is said in passing: the legend's count of the lines it leaves
+    /// out. Theme.textDisabled.
+    Rgba faint;
+    /// The ground under a legend and under the band's numbers, through which
+    /// a reader can see that a stroke runs on. Theme.plotLegendGround, and
+    /// clear on paper, where the page is the ground.
+    Rgba veil;
+    /// The legend's edge. Theme.border.
+    Rgba legendEdge;
+    /// The band a right drag draws, and its edge. Theme.plotBandFill and
+    /// Theme.accent.
+    Rgba bandFill;
+    Rgba bandEdge;
 };
 
 /// The chrome on a dark ground or a light one, or on paper.

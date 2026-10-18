@@ -93,6 +93,14 @@ std::string exponentText(int exponent)
 
 } // namespace
 
+std::string readingText(double value)
+{
+    if (!std::isfinite(value) || value == std::floor(value)) {
+        return numberText(value);
+    }
+    return toPrecision(value, 6);
+}
+
 std::string numberText(double value)
 {
     if (std::isnan(value)) {

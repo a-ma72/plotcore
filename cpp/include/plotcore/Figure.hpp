@@ -63,8 +63,11 @@ enum class TextRole
     Title,
     /// An axis's name: Theme.bodySmall.
     AxisName,
-    /// A line's name in the legend.
+    /// A line's name in the legend: Theme.monoSmall.
     Legend,
+    /// What is said in passing: the legend's count of the lines it leaves
+    /// out. Theme.micro.
+    Note,
 };
 
 /// How a host measures text. Both are in pane pixels.
@@ -75,27 +78,42 @@ struct TextMeasure
     std::function<double(TextRole role)> height;
 };
 
-/// What the frame is laid out with: Theme's numbers, as a host's own.
+/// What the frame is laid out with: Theme's numbers, as a host's own. The
+/// defaults are the viewer's, so a figure laid out by any host is the picture
+/// the viewer draws.
 struct FigureStyle
 {
+    /// The faces' sizes: Theme.readout, readoutMinor, bodyStrong, bodySmall,
+    /// monoSmall and micro.
     double tickPixels = 10.0;
     double tickMinorPixels = 8.0;
-    double titlePixels = 13.0;
-    double axisNamePixels = 11.0;
-    double legendPixels = 11.0;
+    double titlePixels = 14.0;
+    double axisNamePixels = 13.0;
+    double legendPixels = 12.0;
+    double notePixels = 10.0;
     double gapXS = 2.0;
-    double gapS = 4.0;
+    double gapS = 6.0;
     double gapM = 8.0;
     double gapL = 12.0;
     double s3 = 4.0;
     double s9 = 24.0;
     double labelMargin = 32.0;
+    /// Theme.borderWidthAccent, and the hairline every rule is drawn at.
     double accentWidth = 2.0;
     double ruleWidth = 1.0;
     double tickLength = 4.0;
     double exponentRaise = 4.0;
     double lineWidth = 1.0;
     double markerSize = 4.0;
+    /// Theme.radiusS: the corners of a veil.
+    double radius = 2.0;
+    /// How much of the pane a pointer covers, down and to the right of its
+    /// hotspot (Theme.pointerSize): what the band's numbers stay off.
+    double pointerSize = 24.0;
+    /// The legend's swatch, and how many rows it names before it counts the
+    /// rest (Theme.plotLegendSwatch, plotLegendRows).
+    double legendSwatch = 12.0;
+    int legendRows = 12;
     int tickTarget = 8;
     int denseFactor = 4;
 
@@ -144,6 +162,17 @@ struct FigureSettings
     /// viewer prints it in the bar under the plot -- turns it off and reads
     /// Scene::reading.
     bool readout = true;
+    /// Whether a band being drawn writes its corners and its lengths beside
+    /// it (PlotBand.qml).
+    bool bandReadout = true;
+    /// Whether the figure says over the pane why it cannot draw. A host with
+    /// a way of its own of saying that a view is empty -- the viewer has one
+    /// for every view it has -- turns it off and reads Scene::message.
+    bool paneMessage = true;
+    /// Whether a line can be moved and scaled on its own: the middle button
+    /// or Alt and a drag, Alt and Control and the wheel, and Control and a
+    /// click to put it back (#30).
+    bool lineGestures = true;
     /// The ground the picture is for.
     bool dark = true;
     /// The picture a page would draw: the light scope, whatever is on screen.
@@ -257,7 +286,9 @@ struct Mark
     /// The inside of a box or a circle. Not painted where it is clear.
     Rgba fill = Rgba::of(0.0, 0.0, 0.0, 0.0);
     /// A segment, and the edge of a box or a circle. Not painted at a width
-    /// of 0.
+    /// of 0. A box's edge lies inside the box, as a QML Rectangle's border
+    /// does, so a box is exactly as big as it says; a circle's is centred on
+    /// its radius.
     Rgba stroke;
     double width = 0.0;
     /// A circle's radius, and the radius a box's corners are rounded to.
@@ -309,6 +340,18 @@ struct LegendEntry
     Point textAt;
 };
 
+/// One of the numbers a band being drawn writes beside itself: a corner
+/// ("start", "end") or a length ("widthAbove", "widthBelow", "heightLeft",
+/// "heightRight"), in the box it is drawn in and turned by `turn` degrees.
+/// What PlotBand.labels was, so a test can hold the layout to its rules.
+struct BandLabel
+{
+    std::string key;
+    std::string text;
+    PaneRect box;
+    double turn = 0.0;
+};
+
 /// The sample under the pointer, when there is one.
 struct Reading
 {
@@ -345,10 +388,14 @@ struct Scene
     std::vector<LegendEntry> legend;
     PaneRect legendRect;
     Reading reading;
-    /// The rectangle a right-drag is drawing, while it is.
+    /// The rectangle a right-drag is drawing, while it is, and what is
+    /// written beside it.
     std::optional<PaneRect> band;
-    /// Why nothing can be drawn, said over the pane; empty when it can.
+    std::vector<BandLabel> bandLabels;
+    /// Why nothing can be drawn, said over the pane; empty when it can. The
+    /// title is the same thing said in a few words.
     std::string message;
+    std::string messageTitle;
     Span x;
     Span y;
 
@@ -521,6 +568,12 @@ private:
     [[nodiscard]] Layout layout() const;
     [[nodiscard]] PlotView paneView(const Layout& layout) const;
     [[nodiscard]] Scene compose(const SceneRequest& request);
+    /// The numbers a band being drawn writes beside itself (PlotBand.qml).
+    void bandReadout(Scene& scene, const Layout& layout) const;
+    /// `text` cut to `width` in `role`'s face, with an ellipsis at its end
+    /// or, `middle`, in its middle -- as Qt elides a Text.
+    [[nodiscard]] std::string elided(const std::string& text, double width, TextRole role,
+                                     bool middle = false) const;
     /// `text` broken into lines no wider than `width` in `role`'s face.
     [[nodiscard]] std::vector<std::string> wrapped(const std::string& text, double width,
                                                    TextRole role) const;

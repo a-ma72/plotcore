@@ -43,6 +43,17 @@ namespace plotcore {
 
 /// `String(value)`: the shortest digits that read back as this double.
 [[nodiscard]] std::string numberText(double value);
+/// A sample the crosshair has read, written: PlotSurface.readingNumber. Six
+/// significant figures, except for a whole number, written whole -- the
+/// default x axis is the element's own index, and "12.0000" is four digits of
+/// decoration on a count.
+///
+/// Deliberately not how an axis writes its ticks (axisLabel), which takes its
+/// decimals off the span on screen. The crosshair reads a *sample*, whose
+/// value is a measurement and is worth the digits it was taken with; a band
+/// reads positions in the view, where a digit finer than the pane can resolve
+/// is a digit nobody asked for.
+[[nodiscard]] std::string readingText(double value);
 
 /// `Math.round`: halves go up, towards positive infinity, where std::round
 /// takes them away from zero -- so -2.5 is -2, not -3.

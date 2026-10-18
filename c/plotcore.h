@@ -88,7 +88,9 @@ typedef enum plotcore_text_role
     PLOTCORE_TEXT_TICK_MINOR = 1,
     PLOTCORE_TEXT_TITLE = 2,
     PLOTCORE_TEXT_AXIS_NAME = 3,
-    PLOTCORE_TEXT_LEGEND = 4
+    PLOTCORE_TEXT_LEGEND = 4,
+    /* What is said in passing: the legend's count of the lines it leaves out. */
+    PLOTCORE_TEXT_NOTE = 5
 } plotcore_text_role;
 
 typedef enum plotcore_align
@@ -187,8 +189,9 @@ typedef struct plotcore_line_info
  *
  *   SEGMENT  from (x0, y0) to (x1, y1), in `stroke` at `width`.
  *   BOX      from its top left (x0, y0) to its bottom right (x1, y1), filled
- *            with `fill`, edged in `stroke` at `width`, its corners rounded
- *            to `radius`, the edge in dashes when `dashed`.
+ *            with `fill`, edged in `stroke` at `width` inside those bounds,
+ *            its corners rounded to `radius`, the edge in dashes when
+ *            `dashed`.
  *   CIRCLE   about (x0, y0) at `radius`, filled with `fill` and edged in
  *            `stroke` at `width`.
  *   TEXT     at (x0, y0). `base` is set in `role`'s face and `exponent` raised
@@ -379,8 +382,9 @@ PLOTCORE_API int64_t plotcore_held_bytes(const plotcore_figure* figure);
 /* --- settings, by the names a saved view writes ---------------------------------------- */
 /*
  * The plot as a whole:
- *   bool    xLog yLog flipped minorNumbers markers cursor readout legend
- *           bundle dark paper stacked colours.reversed colours.custom
+ *   bool    xLog yLog flipped minorNumbers markers cursor readout bandReadout
+ *           paneMessage lineGestures legend bundle dark paper stacked
+ *           colours.reversed colours.custom
  *   number  gridStepX gridStepY xLogBase yLogBase highlighted colours.from
  *           colours.to
  *   text    title xLabel yLabel grid ("none" "loose" "dense" "custom")
@@ -395,9 +399,16 @@ PLOTCORE_API int64_t plotcore_held_bytes(const plotcore_figure* figure);
  *   colour  colour (cleared with plotcore_clear_line_colour)
  *
  * The frame's measurements, every one a number: tickPixels tickMinorPixels
- *   titlePixels axisNamePixels legendPixels gapXS gapS gapM gapL s3 s9
- *   labelMargin accentWidth ruleWidth tickLength exponentRaise lineWidth
- *   markerSize tickTarget denseFactor
+ *   titlePixels axisNamePixels legendPixels notePixels gapXS gapS gapM gapL
+ *   s3 s9 labelMargin accentWidth ruleWidth tickLength exponentRaise
+ *   lineWidth markerSize radius pointerSize legendSwatch legendRows
+ *   tickTarget denseFactor
+ *
+ * Four of the plot's settings are a host's to decline: `readout` writes the
+ * reading under the pointer in the pane, `bandReadout` writes a band's
+ * corners and lengths beside it, `paneMessage` says over the pane why it
+ * cannot draw, and `lineGestures` lets one line be moved and scaled on its
+ * own. All four are on until a host turns them off.
  *
  * A change of either scale or of the flip puts the view back, as the viewer's
  * does: a pan in decades and a pan in units have no reading that is both.
@@ -512,8 +523,10 @@ PLOTCORE_API plotcore_rect plotcore_scene_area(const plotcore_scene* scene);
 /* The window on screen: x from x0 to x1, y from y0 to y1. */
 PLOTCORE_API void plotcore_scene_view(const plotcore_scene* scene, double* x0, double* x1,
                                       double* y0, double* y1);
-/* Why nothing can be drawn, or empty when it can. Lives as long as the scene. */
+/* Why nothing can be drawn, or empty when it can, and the same in a few words.
+ * Both live as long as the scene. */
 PLOTCORE_API const char* plotcore_scene_message(const plotcore_scene* scene);
+PLOTCORE_API const char* plotcore_scene_message_title(const plotcore_scene* scene);
 
 PLOTCORE_API int64_t plotcore_scene_line_count(const plotcore_scene* scene);
 PLOTCORE_API plotcore_status plotcore_scene_line(const plotcore_scene* scene, int64_t index,

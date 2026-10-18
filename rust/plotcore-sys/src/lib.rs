@@ -37,6 +37,7 @@ pub const PLOTCORE_TEXT_TICK_MINOR: i32 = 1;
 pub const PLOTCORE_TEXT_TITLE: i32 = 2;
 pub const PLOTCORE_TEXT_AXIS_NAME: i32 = 3;
 pub const PLOTCORE_TEXT_LEGEND: i32 = 4;
+pub const PLOTCORE_TEXT_NOTE: i32 = 5;
 
 pub const PLOTCORE_ALIGN_START: i32 = 0;
 pub const PLOTCORE_ALIGN_MIDDLE: i32 = 1;
@@ -532,6 +533,7 @@ unsafe extern "C" {
         y1: *mut c_double,
     );
     pub fn plotcore_scene_message(scene: *const plotcore_scene) -> *const c_char;
+    pub fn plotcore_scene_message_title(scene: *const plotcore_scene) -> *const c_char;
     pub fn plotcore_scene_line_count(scene: *const plotcore_scene) -> i64;
     pub fn plotcore_scene_line(
         scene: *const plotcore_scene,

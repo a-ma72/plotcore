@@ -8,12 +8,15 @@
 // because a host sees nothing else.
 
 #include "plotcore/Figure.hpp"
+#include "plotcore/Format.hpp"
 #include "plotcore/Plot.hpp"
+#include "plotcore/Ticks.hpp"
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
+#include <map>
 #include <numbers>
 #include <vector>
 
@@ -1113,25 +1116,38 @@ TEST_CASE("the crosshair, the legend, the band and the message are marks a host 
     FigureSettings settings = figure.settings();
     settings.legend = true;
     figure.setSettings(settings);
+    const FigureStyle style;
+    const Chrome chrome = chromeFor(true, false);
     const Scene first = figure.scene();
-    const auto boxes = first.marks(Mark::Kind::Box);
-    REQUIRE(boxes.size() == 1); // the legend's
-    REQUIRE(boxes.front().layer == Mark::Layer::Frame);
-    REQUIRE(boxes.front().from.x() == first.legendRect.x);
+
+    // The legend's veil, rounded and edged, exactly where legendRect says.
+    bool veiled = false;
+    for (const Mark& box : first.marks(Mark::Kind::Box)) {
+        veiled = veiled || (box.from.x() == first.legendRect.x &&
+                            box.from.y() == first.legendRect.y && box.radius == style.radius &&
+                            box.fill == chrome.veil && box.stroke == chrome.legendEdge);
+    }
+    REQUIRE(veiled);
 
     // Pointing reads a sample: rules through it and a ring round it, clipped
     // to the pane, and the reading written in a box in the corner.
-    const Point at = sampleAt(first, 0, 120);
+    const Point at = sampleAt(first, 0, 121);
     figure.hover(at.x(), at.y());
     const Scene read = figure.scene();
+    REQUIRE(read.reading.valid);
+    REQUIRE(read.reading.xText == "121");
+    REQUIRE(read.reading.yText == "70.5000");
     const auto rings = read.marks(Mark::Kind::Circle);
     REQUIRE(rings.size() == 1);
     REQUIRE(rings.front().clipped);
     REQUIRE(rings.front().layer == Mark::Layer::Overlay);
-    REQUIRE(rings.front().from.x() == Approx(read.reading.at.x()));
+    REQUIRE(rings.front().stroke == chrome.cursorInk);
+    // As wide as a marker and its ring, with the ring inside that width.
+    REQUIRE(rings.front().radius + rings.front().width / 2.0 ==
+            Approx((style.markerSize + style.accentWidth) / 2.0));
     bool written = false;
     for (const TextItem& text : read.texts()) {
-        written = written || text.text == "x " + read.reading.xText + "   y " + read.reading.yText;
+        written = written || text.text == "x 121   y 70.5000";
     }
     REQUIRE(written);
 
@@ -1141,20 +1157,28 @@ TEST_CASE("the crosshair, the legend, the band and the message are marks a host 
     figure.setSettings(settings);
     const Scene quiet = figure.scene();
     REQUIRE(quiet.reading.valid);
-    REQUIRE(quiet.marks(Mark::Kind::Box).size() == 1);
     REQUIRE(quiet.texts().size() == read.texts().size() - 1);
 
-    // A band is a box, dashed, over everything but the message.
+    // A band is a box edged in the accent, and the crosshair goes while it
+    // is drawn -- and only then: a pan reads as it goes.
     figure.press(at.x(), at.y(), Button::Right, {});
     figure.move(at.x() + 100.0, at.y() + 60.0, {});
     const Scene banding = figure.scene();
-    const auto band = banding.marks(Mark::Kind::Box).back();
-    REQUIRE(band.dashed);
-    REQUIRE(band.layer == Mark::Layer::Overlay);
-    REQUIRE(band.to.x() - band.from.x() == Approx(banding.band->width));
+    REQUIRE_FALSE(banding.reading.valid);
+    bool band = false;
+    for (const Mark& box : banding.marks(Mark::Kind::Box)) {
+        band = band || (box.stroke == chrome.bandEdge && box.fill == chrome.bandFill &&
+                        box.width == style.accentWidth &&
+                        box.to.x() - box.from.x() == Approx(banding.band->width));
+    }
+    REQUIRE(band);
     figure.release(at.x() + 100.0, at.y() + 60.0, Button::Right, {});
+    figure.press(at.x(), at.y(), Button::Left, {});
+    figure.move(at.x() + 3.0, at.y(), {});
+    REQUIRE(figure.scene().reading.valid);
+    figure.release(at.x() + 3.0, at.y(), Button::Left, {});
 
-    // A pane that cannot draw says why, broken into lines that fit it.
+    // A pane that cannot draw says why, broken into lines that fit it...
     std::vector<double> negative(100, -1.0);
     Figure empty = figureOf({negative}, 300.0, 400.0);
     FigureSettings logarithmic = empty.settings();
@@ -1162,6 +1186,7 @@ TEST_CASE("the crosshair, the legend, the band and the message are marks a host 
     empty.setSettings(logarithmic);
     const Scene said = empty.scene();
     REQUIRE_FALSE(said.message.empty());
+    REQUIRE(said.messageTitle == "nothing on this scale");
     std::string joined;
     int lines = 0;
     for (const TextItem& text : said.texts()) {
@@ -1170,9 +1195,198 @@ TEST_CASE("the crosshair, the legend, the band and the message are marks a host 
         }
         joined += (joined.empty() ? "" : " ") + text.text;
         ++lines;
-        REQUIRE(FigureStyle{}.approximateMeasure().width(text.text, TextRole::AxisName) <=
-                said.area.width);
+        REQUIRE(style.approximateMeasure().width(text.text, TextRole::AxisName) <= said.area.width);
     }
     REQUIRE(lines > 1);
     REQUIRE(joined == said.message);
+
+    // ...unless the host says it its own way.
+    logarithmic.paneMessage = false;
+    empty.setSettings(logarithmic);
+    const Scene unsaid = empty.scene();
+    REQUIRE(unsaid.message == said.message);
+    for (const TextItem& text : unsaid.texts()) {
+        REQUIRE(text.role != TextRole::AxisName);
+    }
+}
+
+namespace {
+
+/// The band's numbers by key.
+std::map<std::string, BandLabel> labelsOf(const Scene& scene)
+{
+    std::map<std::string, BandLabel> out;
+    for (const BandLabel& label : scene.bandLabels) {
+        out[label.key] = label;
+    }
+    return out;
+}
+
+bool clears(const PaneRect& p, const PaneRect& q, double gap)
+{
+    return p.x + p.width + gap <= q.x + 1e-9 || q.x + q.width + gap <= p.x + 1e-9 ||
+           p.y + p.height + gap <= q.y + 1e-9 || q.y + q.height + gap <= p.y + 1e-9;
+}
+
+/// tst_views' verifyBandNumbersAreClear and verifyBandNumbersClearThePointer:
+/// every number inside the pane, clear of the band and of every other number
+/// -- and of the pointer at the end of the drag, when it is over the pane.
+void requireClear(const Scene& scene, std::optional<Point> pointer, bool ofBand)
+{
+    const FigureStyle style;
+    const PaneRect& a = scene.area;
+
+    for (std::size_t i = 0; i < scene.bandLabels.size(); ++i) {
+        const BandLabel& one = scene.bandLabels[i];
+        INFO(one.key);
+        REQUIRE(one.box.x >= a.x - 1e-9);
+        REQUIRE(one.box.y >= a.y - 1e-9);
+        REQUIRE(one.box.x + one.box.width <= a.x + a.width + 1e-9);
+        REQUIRE(one.box.y + one.box.height <= a.y + a.height + 1e-9);
+        if (ofBand || (one.key != "start" && one.key != "end")) {
+            REQUIRE(clears(one.box, *scene.band, style.gapS));
+        }
+        if (pointer.has_value()) {
+            const PaneRect cursor{pointer->x(), pointer->y(), style.pointerSize, style.pointerSize};
+            REQUIRE(clears(one.box, cursor, style.gapS));
+        }
+        for (std::size_t j = i + 1; j < scene.bandLabels.size(); ++j) {
+            INFO(scene.bandLabels[j].key);
+            REQUIRE(clears(one.box, scene.bandLabels[j].box, style.gapS));
+        }
+    }
+}
+
+} // namespace
+
+TEST_CASE("a band being drawn writes its corners and its lengths, clear of everything",
+          "[figure][band]")
+{
+    Figure figure = figureOf({walk(100000)}, 900.0, 600.0);
+    const PaneRect a = figure.scene().area;
+    const Point from(std::round(a.x + a.width * 0.3), std::round(a.y + a.height * 0.3));
+    const Point to(std::round(a.x + a.width * 0.7), std::round(a.y + a.height * 0.7));
+    figure.press(from.x(), from.y(), Button::Right, {});
+    figure.move(to.x(), to.y(), {});
+    const Scene scene = figure.scene();
+    const Camera& camera = figure.camera();
+    const auto xNumber = [&](double v) { return axisLabel(v, scene.x.low, scene.x.high, false); };
+    const auto yNumber = [&](double v) { return axisLabel(v, scene.y.low, scene.y.high, false); };
+    const auto labels = labelsOf(scene);
+    REQUIRE(labels.size() == 6);
+    // Both corners, as the axes read them, through the mapping the zoom
+    // resolves the band with.
+    REQUIRE(labels.at("start").text == xNumber(camera.dataXAt(from.x(), from.y())) + ", " +
+                                           yNumber(camera.dataYAt(from.y(), from.x())));
+    REQUIRE(labels.at("end").text == xNumber(camera.dataXAt(to.x(), to.y())) + ", " +
+                                         yNumber(camera.dataYAt(to.y(), to.x())));
+    // ...the lengths on both x lines and both y lines, the side ones turned
+    // opposite ways and standing on end.
+    REQUIRE(labels.at("widthAbove").text == labels.at("widthBelow").text);
+    REQUIRE(labels.at("heightLeft").text == labels.at("heightRight").text);
+    REQUIRE(labels.at("widthAbove").text ==
+            "\xE2\x88\x86" + xNumber(std::abs(camera.dataXAt(to.x(), to.y()) -
+                                              camera.dataXAt(from.x(), from.y()))));
+    REQUIRE(labels.at("heightLeft").turn == -90.0);
+    REQUIRE(labels.at("heightRight").turn == 90.0);
+    REQUIRE(labels.at("widthAbove").turn == 0.0);
+    REQUIRE(labels.at("heightLeft").box.height > labels.at("heightLeft").box.width);
+    requireClear(scene, to, true);
+
+    // The band goes with the button, and its numbers with it.
+    figure.release(to.x(), to.y(), Button::Right, {});
+    REQUIRE(figure.scene().bandLabels.empty());
+
+    // A band too narrow for its width does not get one, and still has its
+    // height on both sides.
+    figure.resetView();
+    const double middle = std::round(a.x + a.width * 0.5);
+    figure.press(middle, std::round(a.y + a.height * 0.2), Button::Right, {});
+    figure.move(middle + 4.0, std::round(a.y + a.height * 0.8), {});
+    const auto narrow = labelsOf(figure.scene());
+    REQUIRE(narrow.count("start") == 1);
+    REQUIRE(narrow.count("end") == 1);
+    REQUIRE(narrow.count("widthAbove") == 0);
+    REQUIRE(narrow.count("widthBelow") == 0);
+    REQUIRE(narrow.count("heightLeft") == 1);
+    REQUIRE(narrow.count("heightRight") == 1);
+    requireClear(figure.scene(), Point(middle + 4.0, std::round(a.y + a.height * 0.8)), true);
+    figure.release(middle + 4.0, std::round(a.y + a.height * 0.8), Button::Right, {});
+
+    // ...and a drag off the pane reads the edge it stopped at, its numbers
+    // inside the pane and off the band.
+    figure.resetView();
+    const Scene whole = figure.scene();
+    const double offY = std::round(a.y + a.height * 0.9);
+    figure.press(std::round(a.x + a.width * 0.4), std::round(a.y + a.height * 0.4), Button::Right,
+                 {});
+    figure.move(0.0, offY, {});
+    const Scene off = figure.scene();
+    REQUIRE(labelsOf(off).at("end").text ==
+            axisLabel(whole.x.low, whole.x.low, whole.x.high, false) + ", " +
+                axisLabel(figure.camera().dataYAt(offY, 0.0), whole.y.low, whole.y.high, false));
+    // A drag off the pane leaves the corner nowhere clear of the pointer,
+    // which is past the edge: tst_views holds this one to the rest alone.
+    requireClear(off, std::nullopt, true);
+    figure.release(0.0, offY, Button::Right, {});
+
+    // A host that does not want them gets the band alone.
+    FigureSettings settings = figure.settings();
+    settings.bandReadout = false;
+    figure.setSettings(settings);
+    figure.press(from.x(), from.y(), Button::Right, {});
+    figure.move(to.x(), to.y(), {});
+    const Scene bare = figure.scene();
+    REQUIRE(bare.band.has_value());
+    REQUIRE(bare.bandLabels.empty());
+}
+
+TEST_CASE("the legend on the plot names twelve lines and counts the rest", "[figure]")
+{
+    std::vector<std::vector<double>> many;
+    for (int i = 0; i < 15; ++i) {
+        many.push_back(ramp(200, static_cast<double>(i), 1.0));
+    }
+    Figure figure = figureOf(many);
+    FigureSettings settings = figure.settings();
+    settings.legend = true;
+    figure.setSettings(settings);
+    const Scene scene = figure.scene();
+    REQUIRE(scene.legend.size() == 12);
+    bool counted = false;
+    for (const TextItem& text : scene.texts()) {
+        counted = counted || (text.text == "+3 more" && text.role == TextRole::Note);
+    }
+    REQUIRE(counted);
+    // No wider than half the pane, with a long name cut in the middle.
+    Figure named = figureOf({ramp(10, 0.0, 1.0)}, 400.0, 300.0);
+    named.plot().setName(0, "/a/very/long/path/to/a/dataset/that/goes/on/and/on[0, :]");
+    named.setSettings(settings);
+    const Scene cut = named.scene();
+    REQUIRE(cut.legendRect.width <= cut.area.width * 0.5 + 1e-9);
+    bool middle = false;
+    for (const TextItem& text : cut.texts()) {
+        if (text.role == TextRole::Legend) {
+            middle = text.text.rfind("/a/", 0) == 0 &&
+                     text.text.find("\xE2\x80\xA6") != std::string::npos && text.text.size() > 4 &&
+                     text.text.substr(text.text.size() - 2) == ":]";
+        }
+    }
+    REQUIRE(middle);
+}
+
+TEST_CASE("a host may keep a line from being moved on its own", "[figure]")
+{
+    Figure figure = figureOf({ramp(300, 0.0, 1.0), ramp(300, 100.0, -1.0)});
+    FigureSettings settings = figure.settings();
+    settings.lineGestures = false;
+    figure.setSettings(settings);
+    const Scene before = figure.scene();
+    const Point at = sampleAt(before, 0, 150);
+    figure.press(at.x(), at.y(), Button::Left, Modifiers{false, false, true});
+    figure.move(at.x(), at.y() + 40.0, {});
+    figure.release(at.x(), at.y() + 40.0, Button::Left, {});
+    REQUIRE(figure.lineSettings(0).shift == 0.0);
+    figure.wheel(at.x(), at.y(), 240.0, Modifiers{false, true, true});
+    REQUIRE(figure.lineSettings(0).scale == 1.0);
 }

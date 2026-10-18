@@ -225,6 +225,7 @@ _DECLARATIONS = {
     "plotcore_scene_area": (Rect, [_scene]),
     "plotcore_scene_view": (None, [_scene, _doubles, _doubles, _doubles, _doubles]),
     "plotcore_scene_message": (c_char_p, [_scene]),
+    "plotcore_scene_message_title": (c_char_p, [_scene]),
     "plotcore_scene_line_count": (c_int64, [_scene]),
     "plotcore_scene_line": (_status, [_scene, c_int64, POINTER(LineInfo)]),
     "plotcore_scene_line_run_length": (c_int64, [_scene, c_int64, c_int64]),

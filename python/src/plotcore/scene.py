@@ -30,6 +30,8 @@ class TextRole(enum.IntEnum):
     TITLE = 2
     AXIS_NAME = 3
     LEGEND = 4
+    #: What is said in passing: the legend's count of the lines it leaves out.
+    NOTE = 5
 
 
 class Align(enum.IntEnum):
@@ -115,7 +117,7 @@ class Mark:
     runs from its top left (x0, y0) to its bottom right (x1, y1), filled with
     `fill` and edged in `stroke` at `width`, its corners rounded to `radius`
     and its edge in dashes when `dashed`. A CIRCLE is about (x0, y0) at
-    `radius`. A TEXT is at (x0, y0): `base` in `role`'s face and `exponent`
+    `radius`, edged inside its bounds. A TEXT is at (x0, y0): `base` in `role`'s face and `exponent`
     raised `rise` above it in TICK_MINOR's, `text` both in one string, turned
     `turn` degrees clockwise about that point and aligned in the turned frame.
     A clear fill is not painted, nor an edge of no width; a `clipped` mark is
@@ -174,6 +176,8 @@ class Scene:
     area: Rect
     view: Tuple[float, float, float, float]
     message: str
+    #: The message in a few words.
+    message_title: str
     #: Painted under the lines, in order: the grid.
     under: List[Mark] = field(default_factory=list)
     #: The lines, clipped to `area`.
@@ -193,8 +197,8 @@ class Scene:
 
     @property
     def rules(self) -> List[Mark]:
-        """The grid's rules."""
-        return [mark for mark in self.under if mark.kind == MarkKind.SEGMENT]
+        """The grid's rules: everything painted under the lines."""
+        return list(self.under)
 
 
 def _colour(rgba: _native.Rgba) -> Colour:
@@ -272,6 +276,7 @@ def copy_scene(handle) -> Scene:
         area=_rect(lib.plotcore_scene_area(handle)),
         view=(x0.value, x1.value, y0.value, y1.value),
         message=_text(lib.plotcore_scene_message(handle)),
+        message_title=_text(lib.plotcore_scene_message_title(handle)),
     )
     info = _native.LineInfo()
     for index in range(lib.plotcore_scene_line_count(handle)):
