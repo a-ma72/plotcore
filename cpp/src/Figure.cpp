@@ -261,18 +261,30 @@ void Figure::setSize(double width, double height, double pixelRatio)
 void Figure::resetView()
 {
     camera_.reset();
+    // The whole of every line, which is where nothing is heading.
+    source().clearFocus();
+}
+
+void Figure::setSource(LineSource* source)
+{
+    source_ = source;
+    // A drag holds a line by its number, and the numbers are the old source's.
+    drag_ = Drag::None;
+    dragLine_ = -1;
 }
 
 void Figure::setViewRange(double x0, double x1, double y0, double y1)
 {
-    updateBounds();
+    refresh();
     camera_.area = layout().area;
     camera_.setViewRange(x0, x1, y0, y1);
 }
 
 void Figure::removeLine(int line)
 {
-    plot_.removeLine(line);
+    if (source_ == nullptr) {
+        plot_.removeLine(line);
+    }
     if (static_cast<std::size_t>(line) < lines_.size()) {
         lines_.erase(lines_.begin() + line);
     }
@@ -301,64 +313,76 @@ void Figure::clear()
     camera_.reset();
 }
 
-std::vector<int> Figure::drawnLines() const
+int Figure::positionOf(int line) const
 {
-    std::vector<int> drawn;
-    for (int i = 0; i < plot_.lineCount(); ++i) {
-        if (lineSettings(i).visible && plot_.ready(i) && plot_.length(i) > 0) {
-            drawn.push_back(i);
+    for (std::size_t k = 0; k < drawn_.size(); ++k) {
+        if (drawn_[k].line == line) {
+            return static_cast<int>(k);
         }
     }
-    return drawn;
+    return -1;
 }
 
-bool Figure::commonLine(int line) const
+bool Figure::commonLine(int position) const
 {
     // A line on an axis of its own needs a second line to be beside: the
     // request is kept, so a second line brings the axis back. See H5Scope's CLAUDE.md.
-    if (drawnLines().size() < 2) {
+    if (drawn_.size() < 2) {
         return true;
     }
-    const LineSettings own = lineSettings(line);
+    const LineSettings own = lineSettings(drawn_[static_cast<std::size_t>(position)].line);
     return !(own.ownAxis || settings_.stacked || own.scale != 1.0 || own.shift != 0.0);
 }
 
-bool Figure::spansCommon(int line) const
+bool Figure::spansCommon(int position) const
 {
     // A moved or scaled line is still a reading on the common axis's units --
     // its window is a share of that axis's whole -- so it stays in the whole.
     // Taking it out would move the whole under it, and the line with it, on
     // the gesture that was meant to hold the value under the pointer still.
-    if (drawnLines().size() < 2) {
+    if (drawn_.size() < 2) {
         return true;
     }
-    return !(lineSettings(line).ownAxis || settings_.stacked);
+    return !(lineSettings(drawn_[static_cast<std::size_t>(position)].line).ownAxis ||
+             settings_.stacked);
 }
 
-void Figure::updateBounds()
+void Figure::refresh()
 {
-    const std::vector<int> drawn = drawnLines();
+    const LineSource& lines = source();
+    drawn_.clear();
+    long long longest = 1;
+    const int count = lines.lineCount();
+    for (int i = 0; i < count; ++i) {
+        if (!lineSettings(i).visible || !lines.ready(i)) {
+            continue;
+        }
+        const long long length = lines.length(i);
+        if (length <= 0) {
+            continue;
+        }
+        longest = std::max(longest, length);
+        drawn_.push_back(Drawn{i, lines.extent(i), lines.xExtent(i), lines.xPositiveMinimum(i)});
+    }
+
     double xMin = kInfinity;
     double xMax = -kInfinity;
     double xPositive = 0.0;
-    long long longest = 1;
     double yMin = kInfinity;
     double yMax = -kInfinity;
     double yPositive = 0.0;
     bool anyCommon = false;
-    for (const int line : drawn) {
-        const Span x = plot_.xExtent(line);
-        xMin = std::min(xMin, x.low);
-        xMax = std::max(xMax, x.high);
-        const double positive = plot_.xPositiveMinimum(line);
-        if (positive > 0.0 && (xPositive == 0.0 || positive < xPositive)) {
-            xPositive = positive;
+    for (std::size_t k = 0; k < drawn_.size(); ++k) {
+        const Drawn& line = drawn_[k];
+        xMin = std::min(xMin, line.x.low);
+        xMax = std::max(xMax, line.x.high);
+        if (line.xPositive > 0.0 && (xPositive == 0.0 || line.xPositive < xPositive)) {
+            xPositive = line.xPositive;
         }
-        longest = std::max(longest, plot_.length(line));
-        if (!spansCommon(line)) {
+        if (!spansCommon(static_cast<int>(k))) {
             continue;
         }
-        const LineExtent extent = plot_.extent(line);
+        const LineExtent& extent = line.extent;
         if (extent.finite) {
             yMin = std::min(yMin, extent.minimum);
             yMax = std::max(yMax, extent.maximum);
@@ -411,16 +435,18 @@ double Figure::commonFraction(double value) const
     return (axisPosition(value, y.logarithmic, y.base) - from) / (to - from);
 }
 
-Figure::LineWindow Figure::windowOf(int line, int position, int drawn, bool always) const
+Figure::LineWindow Figure::windowOf(int position, bool always) const
 {
     LineWindow window;
-    if (!always && commonLine(line)) {
+    if (!always && commonLine(position)) {
         return window;
     }
-    const LineSettings own = lineSettings(line);
+    const Drawn& drawnLine = drawn_[static_cast<std::size_t>(position)];
+    const LineSettings own = lineSettings(drawnLine.line);
     const bool yLog = settings_.yLog;
     const double base = settings_.yLogBase;
-    const LineExtent extent = plot_.extent(line);
+    const LineExtent& extent = drawnLine.extent;
+    const auto drawn = static_cast<double>(drawn_.size());
 
     double low = 0.0;
     double high = 1.0;
@@ -491,11 +517,12 @@ Figure::Layout Figure::layout() const
     ticks.fontPixels = s.tickPixels;
     ticks.denseFactor = s.denseFactor;
 
-    const std::vector<int> drawn = drawnLines();
     // Numbered while any line is a reading on it -- a moved one included,
     // whose window is a share of the common one's units.
-    lay.common = drawn.empty() || std::any_of(drawn.begin(), drawn.end(),
-                                              [&](int line) { return spansCommon(line); });
+    lay.common = drawn_.empty();
+    for (std::size_t k = 0; k < drawn_.size() && !lay.common; ++k) {
+        lay.common = spansCommon(static_cast<int>(k));
+    }
     lay.tickHeight = measure_.height(TextRole::Tick);
     lay.minorHeight = measure_.height(TextRole::TickMinor);
     lay.nameHeight = measure_.height(TextRole::AxisName);
@@ -508,19 +535,19 @@ Figure::Layout Figure::layout() const
     const std::string& footName = !flipped ? settings_.xLabel : lay.common ? settings_.yLabel : "";
 
     // The side axes: every line drawn on a window of its own.
-    for (std::size_t k = 0; k < drawn.size(); ++k) {
-        const LineWindow window =
-            windowOf(drawn[k], static_cast<int>(k), static_cast<int>(drawn.size()));
+    const auto count = static_cast<int>(drawn_.size());
+    for (int k = 0; k < count; ++k) {
+        const LineWindow window = windowOf(k);
         if (!window.own || !window.axis) {
             continue;
         }
+        const int line = drawn_[static_cast<std::size_t>(k)].line;
         Layout::Side side;
-        side.line = drawn[k];
+        side.line = line;
         side.window = window;
-        side.colour = seriesColor(settings_.colours, drawn[k], static_cast<int>(k),
-                                  static_cast<int>(drawn.size()), settings_.paper, settings_.dark,
-                                  lineSettings(drawn[k]).colour);
-        side.label = lineSettings(drawn[k]).axisLabel;
+        side.colour = seriesColor(settings_.colours, source().series(line), k, count,
+                                  settings_.paper, settings_.dark, lineSettings(line).colour);
+        side.label = lineSettings(line).axisLabel;
         lay.sides.push_back(side);
     }
 
@@ -634,6 +661,7 @@ PlotView Figure::paneView(const Layout& lay) const
     pane.height = lay.area.height;
     pane.pixelRatio = pixelRatio_;
     pane.transposed = settings_.flipped;
+    pane.maxColumns = maxColumnsFor(static_cast<int>(drawn_.size()));
     return pane;
 }
 
@@ -641,24 +669,22 @@ std::string Figure::reason() const
 {
     // PlotSurface.logReason: asked of what the axes were offered, not of what
     // they settled on, because both settle on a nominal power.
-    const std::vector<int> drawn = drawnLines();
-    if (drawn.empty()) {
+    if (drawn_.empty()) {
         return {};
     }
     bool commonPositive = false;
     bool anyCommon = false;
     double positiveX = 0.0;
     double highestX = -kInfinity;
-    for (const int line : drawn) {
-        highestX = std::max(highestX, plot_.xExtent(line).high);
-        const double p = plot_.xPositiveMinimum(line);
-        if (p > 0.0 && (positiveX == 0.0 || p < positiveX)) {
-            positiveX = p;
+    for (std::size_t k = 0; k < drawn_.size(); ++k) {
+        const Drawn& line = drawn_[k];
+        highestX = std::max(highestX, line.x.high);
+        if (line.xPositive > 0.0 && (positiveX == 0.0 || line.xPositive < positiveX)) {
+            positiveX = line.xPositive;
         }
-        if (spansCommon(line)) {
+        if (spansCommon(static_cast<int>(k))) {
             anyCommon = true;
-            const LineExtent extent = plot_.extent(line);
-            commonPositive = commonPositive || (extent.finite && extent.maximum > 0.0);
+            commonPositive = commonPositive || (line.extent.finite && line.extent.maximum > 0.0);
         }
     }
     if (settings_.yLog && anyCommon && !commonPositive) {
@@ -672,55 +698,98 @@ std::string Figure::reason() const
     return {};
 }
 
-Scene Figure::scene()
+Scene Figure::scene(const SceneRequest& request)
 {
-    updateBounds();
+    refresh();
+    // A picture is laid out at its own size and in its own scope, and leaves
+    // the pane's as they were: the figure goes on being the pane's, and the
+    // next gesture is measured against the pane and not against the picture.
+    struct Held
+    {
+        Figure& figure;
+        double width;
+        double height;
+        double pixelRatio;
+        bool paper;
+        PaneRect area;
+        ~Held()
+        {
+            figure.width_ = width;
+            figure.height_ = height;
+            figure.pixelRatio_ = pixelRatio;
+            figure.settings_.paper = paper;
+            figure.camera_.area = area;
+        }
+    };
+    Held held{*this, width_, height_, pixelRatio_, settings_.paper, camera_.area};
+    if (request.picture) {
+        width_ = request.width > 0.0 ? request.width : width_;
+        height_ = request.height > 0.0 ? request.height : height_;
+        pixelRatio_ = request.pixelRatio > 0.0 ? request.pixelRatio : pixelRatio_;
+    }
+    settings_.paper = settings_.paper || request.paper;
+    Scene composed = compose(request);
+    if (!request.picture) {
+        // The pane's own layout, which the gestures are measured against.
+        held.area = camera_.area;
+    }
+    return composed;
+}
+
+Scene Figure::compose(const SceneRequest& request)
+{
     const Layout lay = layout();
     camera_.area = lay.area;
     const FigureStyle& s = style_;
     const Chrome chrome = chromeFor(settings_.dark, settings_.paper);
+    const SceneOptions& want = request.geometry;
 
     Scene scene;
     scene.width = width_;
     scene.height = height_;
     scene.ground = chrome.ground;
+    if (request.transparent) {
+        scene.ground.alpha = 0.0;
+    }
     scene.chrome = chrome;
     scene.area = lay.area;
     scene.x = {camera_.viewMinX(), camera_.viewMaxX()};
     scene.y = {camera_.viewMinY(), camera_.viewMaxY()};
-
-    const std::vector<int> drawn = drawnLines();
     scene.message = reason();
 
     // --- the lines ---------------------------------------------------------
     const PlotView pane = paneView(lay);
     const PlotView upright = uprightView(pane);
-    const double columns = (settings_.flipped ? lay.area.height : lay.area.width) * pixelRatio_;
-    plot_.setPaneColumns(columnsOf(columns));
-    plot_.setView(camera_.viewMinX(), camera_.viewMaxX(), settings_.xLog);
+    if (!request.picture) {
+        // The news, for a source that folds or reads by it. A picture asks for
+        // nothing: it is drawn from what the lines hold for the pane.
+        const double columns = (settings_.flipped ? lay.area.height : lay.area.width) * pixelRatio_;
+        source().setPaneColumns(columnsOf(columns));
+        source().setView(camera_.viewMinX(), camera_.viewMaxX(), settings_.xLog);
+    }
 
+    const auto count = static_cast<int>(drawn_.size());
     std::vector<PlotLine> projected;
     std::vector<PlotAxis> axes;
     std::vector<LineWindow> windows;
-    for (std::size_t k = 0; k < drawn.size(); ++k) {
-        const int index = drawn[k];
-        const int count = static_cast<int>(drawn.size());
-        PlotLine line = plot_.drawLine(index);
-        const Rgba colour =
-            seriesColor(settings_.colours, index, static_cast<int>(k), count, settings_.paper,
-                        settings_.dark, lineSettings(index).colour);
+    for (int k = 0; k < count; ++k) {
+        const int index = drawn_[static_cast<std::size_t>(k)].line;
+        const int series = source().series(index);
+        PlotLine line = source().drawLine(index);
+        const Rgba colour = seriesColor(settings_.colours, series, k, count, settings_.paper,
+                                        settings_.dark, lineSettings(index).colour);
         line.colour = colour;
-        line.opacity = seriesOpacity(index, count, settings_.highlighted, settings_.bundle,
+        line.opacity = seriesOpacity(series, count, settings_.highlighted, settings_.bundle,
                                      settings_.dark && !settings_.paper);
-        line.width = seriesWidth(index, settings_.highlighted, s.lineWidth);
-        const LineWindow window = windowOf(index, static_cast<int>(k), count);
+        line.width = seriesWidth(series, settings_.highlighted, s.lineWidth);
+        const LineWindow window = windowOf(k);
         if (window.own) {
             line.ownY = true;
             line.yMin = window.low;
             line.yMax = window.high;
             line.ownYLog = window.logarithmic;
         }
-        const PlotAxis axis = plot_.drawAxis(index);
+        const PlotAxis axis = source().drawAxis(index);
         projected.push_back(line);
         axes.push_back(axis);
         windows.push_back(window);
@@ -742,9 +811,11 @@ Scene Figure::scene()
                          axisValue(yFrom + up * (yTo - yFrom), view.yLog, view.yLogBase));
         };
         std::vector<Point> values;
-        values.reserve(points.size());
-        for (const Point& point : points) {
-            values.push_back(valueOf(point));
+        if (want.values) {
+            values.reserve(points.size());
+            for (const Point& point : points) {
+                values.push_back(valueOf(point));
+            }
         }
         if (pane.transposed) {
             for (Point& point : points) {
@@ -770,19 +841,30 @@ Scene Figure::scene()
                 const Point& p = points[static_cast<std::size_t>(run.first + i)];
                 stroke.emplace_back(p.x() + lay.area.x, p.y() + lay.area.y);
             }
-            std::vector<Point> strip;
-            strokeRunInto(stroke.data(), static_cast<int>(stroke.size()), line.width,
-                          [&](double px, double py) { strip.emplace_back(px, py); });
-            trianglesOf(strip, drawnLine.triangles);
+            if (want.triangles || want.strips) {
+                std::vector<Point> strip;
+                strokeRunInto(stroke.data(), static_cast<int>(stroke.size()), line.width,
+                              [&](double px, double py) { strip.emplace_back(px, py); });
+                if (want.triangles) {
+                    trianglesOf(strip, drawnLine.triangles);
+                }
+                if (want.strips) {
+                    drawnLine.strips.push_back(std::move(strip));
+                }
+            }
             if (marks) {
                 drawnLine.markers.insert(drawnLine.markers.end(), stroke.begin(), stroke.end());
             }
-            drawnLine.runs.push_back(std::move(stroke));
-            drawnLine.values.emplace_back(values.begin() + run.first,
-                                          values.begin() + run.first + run.count);
+            if (want.runs) {
+                drawnLine.runs.push_back(std::move(stroke));
+            }
+            if (want.values) {
+                drawnLine.values.emplace_back(values.begin() + run.first,
+                                              values.begin() + run.first + run.count);
+            }
         }
         scene.lines.push_back(std::move(drawnLine));
-        scene.legend.push_back(LegendEntry{index, plot_.name(index), colour, {}, {}, {}});
+        scene.legend.push_back(LegendEntry{index, source().name(index), colour, {}, {}, {}});
     }
 
     // --- the rules, under everything ----------------------------------------
@@ -1042,12 +1124,23 @@ Scene Figure::scene()
     }
 
     // --- the reading under the pointer -----------------------------------------
-    if (settings_.cursor && pointer_.has_value() && drag_ == Drag::None && scene.message.empty()) {
+    // Which line, which sample, and where it was drawn in the pane: taken from
+    // the pointer on the pane, or named outright for a picture nobody is
+    // pointing at.
+    struct Taken
+    {
+        int position = -1;
+        double x = 0.0;
+        double y = 0.0;
+        double px = 0.0;
+        double py = 0.0;
+    };
+    std::optional<Taken> taken;
+    if (!request.picture && settings_.cursor && pointer_.has_value() && drag_ == Drag::None &&
+        scene.message.empty()) {
         const double px = pointer_->x() - a.x;
         const double py = pointer_->y() - a.y;
         if (px >= 0.0 && py >= 0.0 && px <= a.width && py <= a.height && !projected.empty()) {
-            std::optional<NearestSample> best;
-            std::size_t bestAt = 0;
             double bestDistance = kInfinity;
             // One line at a time, each with its own x axis -- a line may carry
             // a time of its own -- and the nearest of all of them taken.
@@ -1068,35 +1161,52 @@ Scene Figure::scene()
                     (found->px - px) * (found->px - px) + (found->py - py) * (found->py - py);
                 if (distance < bestDistance) {
                     bestDistance = distance;
-                    best = found;
-                    bestAt = k;
+                    taken = Taken{static_cast<int>(k), found->x, found->y, found->px, found->py};
                 }
-            }
-            if (best.has_value()) {
-                Reading& reading = scene.reading;
-                reading.valid = true;
-                reading.line = drawn[bestAt];
-                reading.x = best->x;
-                reading.y = best->y;
-                reading.at = Point(a.x + best->px, a.y + best->py);
-                reading.xText =
-                    axisLabel(best->x, cx.viewLow(), cx.viewHigh(), lay.xTicks.logarithmic);
-                const LineWindow& window = windows[bestAt];
-                reading.yText =
-                    window.own
-                        ? axisLabel(best->y, window.low, window.high, window.logarithmic)
-                        : axisLabel(best->y, cy.viewLow(), cy.viewHigh(), lay.yTicks.logarithmic);
-                scene.strokes.push_back(Segment{Point(reading.at.x(), a.y),
-                                                Point(reading.at.x(), a.y + a.height), axisColour,
-                                                s.ruleWidth});
-                scene.strokes.push_back(Segment{Point(a.x, reading.at.y()),
-                                                Point(a.x + a.width, reading.at.y()), axisColour,
-                                                s.ruleWidth});
             }
         }
     }
+    else if (request.reading.has_value() && scene.message.empty()) {
+        // PlotFrame.placeReading: the sample is what crosses over, not the
+        // place it was drawn, and where it lands is this layout's own
+        // arithmetic -- through the line's own axis when it has one, which is
+        // the only place its curve is.
+        const PinnedSample& sample = *request.reading;
+        const int position = positionOf(sample.line);
+        if (position >= 0) {
+            const LineWindow& window = windows[static_cast<std::size_t>(position)];
+            const double along =
+                fractionOn(sample.x, cx.viewLow(), cx.viewHigh(), cx.logarithmic, cx.base);
+            const double up =
+                window.own
+                    ? fractionOn(sample.y, window.low, window.high, window.logarithmic, cy.base)
+                    : fractionOn(sample.y, cy.viewLow(), cy.viewHigh(), cy.logarithmic, cy.base);
+            const bool flipped = settings_.flipped;
+            taken = Taken{position, sample.x, sample.y, (flipped ? up : along) * a.width,
+                          a.height - (flipped ? along : up) * a.height};
+        }
+    }
+    if (taken.has_value()) {
+        Reading& reading = scene.reading;
+        reading.valid = true;
+        reading.line = drawn_[static_cast<std::size_t>(taken->position)].line;
+        reading.x = taken->x;
+        reading.y = taken->y;
+        reading.at = Point(a.x + taken->px, a.y + taken->py);
+        reading.xText = axisLabel(taken->x, cx.viewLow(), cx.viewHigh(), lay.xTicks.logarithmic);
+        const LineWindow& window = windows[static_cast<std::size_t>(taken->position)];
+        reading.yText =
+            window.own ? axisLabel(taken->y, window.low, window.high, window.logarithmic)
+                       : axisLabel(taken->y, cy.viewLow(), cy.viewHigh(), lay.yTicks.logarithmic);
+        scene.strokes.push_back(Segment{Point(reading.at.x(), a.y),
+                                        Point(reading.at.x(), a.y + a.height), axisColour,
+                                        s.ruleWidth});
+        scene.strokes.push_back(Segment{Point(a.x, reading.at.y()),
+                                        Point(a.x + a.width, reading.at.y()), axisColour,
+                                        s.ruleWidth});
+    }
 
-    if (drag_ == Drag::Band) {
+    if (!request.picture && drag_ == Drag::Band) {
         const double left = std::clamp(std::min(pressed_.x(), last_.x()), a.x, a.x + a.width);
         const double right = std::clamp(std::max(pressed_.x(), last_.x()), a.x, a.x + a.width);
         const double topY = std::clamp(std::min(pressed_.y(), last_.y()), a.y, a.y + a.height);
@@ -1110,27 +1220,26 @@ Scene Figure::scene()
 
 int Figure::lineAt(double px, double py, double reach)
 {
-    updateBounds();
+    refresh();
     const Layout lay = layout();
     camera_.area = lay.area;
     const PlotView pane = paneView(lay);
-    const std::vector<int> drawn = drawnLines();
-    plot_.setPaneColumns(
+    source().setPaneColumns(
         columnsOf((settings_.flipped ? lay.area.height : lay.area.width) * pixelRatio_));
-    plot_.setView(camera_.viewMinX(), camera_.viewMaxX(), settings_.xLog);
+    source().setView(camera_.viewMinX(), camera_.viewMaxX(), settings_.xLog);
     int best = -1;
     double bestDistance = reach * reach;
-    for (std::size_t k = 0; k < drawn.size(); ++k) {
-        PlotLine line = plot_.drawLine(drawn[k]);
-        const LineWindow window =
-            windowOf(drawn[k], static_cast<int>(k), static_cast<int>(drawn.size()));
+    for (std::size_t k = 0; k < drawn_.size(); ++k) {
+        const int index = drawn_[k].line;
+        PlotLine line = source().drawLine(index);
+        const LineWindow window = windowOf(static_cast<int>(k));
         if (window.own) {
             line.ownY = true;
             line.yMin = window.low;
             line.yMax = window.high;
             line.ownYLog = window.logarithmic;
         }
-        const PlotAxis axis = plot_.drawAxis(drawn[k]);
+        const PlotAxis axis = source().drawAxis(index);
         const std::optional<NearestSample> found =
             nearestSample(std::span<const PlotLine>(&line, 1), std::span<const PlotAxis>(&axis, 1),
                           pane, px - lay.area.x, py - lay.area.y);
@@ -1141,7 +1250,7 @@ int Figure::lineAt(double px, double py, double reach)
         const double dy = found->py - (py - lay.area.y);
         if (dx * dx + dy * dy <= bestDistance) {
             bestDistance = dx * dx + dy * dy;
-            best = drawn[k];
+            best = index;
         }
     }
     return best;
@@ -1151,18 +1260,16 @@ void Figure::scaleLine(int line, double py, double factor)
 {
     // The value under the pointer stays under it, and the next pan, wheel or
     // band takes the same share of this line's window as of every other.
-    const std::vector<int> drawn = drawnLines();
-    const auto at = std::find(drawn.begin(), drawn.end(), line);
-    if (at == drawn.end() || !(factor > 0.0) || !std::isfinite(factor)) {
+    const int position = positionOf(line);
+    if (position < 0 || !(factor > 0.0) || !std::isfinite(factor)) {
         return;
     }
-    if (drawn.size() < 2) {
+    if (drawn_.size() < 2) {
         return; // a lone line's axis is the common one, and the wheel moves it
     }
     // A line on the common axis is drawn in exactly the window a moved one
     // with a scale of one and no shift would have, so that is what is scaled.
-    const int position = static_cast<int>(at - drawn.begin());
-    const LineWindow window = windowOf(line, position, static_cast<int>(drawn.size()), true);
+    const LineWindow window = windowOf(position, true);
     ensureLine(line);
     LineSettings& held = lines_[static_cast<std::size_t>(line)];
     const double base = settings_.yLogBase;
@@ -1191,13 +1298,11 @@ void Figure::scaleLine(int line, double py, double factor)
 
 void Figure::shiftLine(int line, double pixels)
 {
-    const std::vector<int> drawn = drawnLines();
-    const auto at = std::find(drawn.begin(), drawn.end(), line);
-    if (at == drawn.end() || drawn.size() < 2) {
+    const int position = positionOf(line);
+    if (position < 0 || drawn_.size() < 2) {
         return;
     }
-    const int position = static_cast<int>(at - drawn.begin());
-    const LineWindow window = windowOf(line, position, static_cast<int>(drawn.size()), true);
+    const LineWindow window = windowOf(position, true);
     const double base = settings_.yLogBase;
     const double span = axisPosition(window.high, window.logarithmic, base) -
                         axisPosition(window.low, window.logarithmic, base);
@@ -1215,7 +1320,7 @@ void Figure::shiftLine(int line, double pixels)
 
 void Figure::wheel(double px, double py, double angleDelta, Modifiers modifiers)
 {
-    updateBounds();
+    refresh();
     const Layout lay = layout();
     camera_.area = lay.area;
     if (!reason().empty()) {
@@ -1229,12 +1334,18 @@ void Figure::wheel(double px, double py, double angleDelta, Modifiers modifiers)
         }
         return;
     }
-    (void)camera_.zoomAt(px, py, factor, zoomAxesFor(modifiers.shift, modifiers.control));
+    // Where the zoom is heading goes to the lines before the window it makes
+    // does (PlotSurface.pushZoomFocus), so that whatever is read for it is read
+    // towards the pointer.
+    if (const std::optional<GestureFocus> focus =
+            camera_.zoomAt(px, py, factor, zoomAxesFor(modifiers.shift, modifiers.control))) {
+        source().focus(*focus);
+    }
 }
 
 void Figure::press(double px, double py, Button button, Modifiers modifiers)
 {
-    updateBounds();
+    refresh();
     camera_.area = layout().area;
     pressed_ = last_ = Point(px, py);
     pointer_ = Point(px, py);
@@ -1266,8 +1377,11 @@ void Figure::move(double px, double py, Modifiers)
     moved_ = moved_ || std::abs(px - pressed_.x()) > 2.0 || std::abs(py - pressed_.y()) > 2.0;
     if (drag_ == Drag::Pan) {
         camera_.panBy(dx, dy);
+        // A drag has nowhere it is heading (PlotSurface.panBy).
+        source().clearFocus();
     }
     else if (drag_ == Drag::Line) {
+        refresh();
         shiftLine(dragLine_, settings_.flipped ? dx : dy);
     }
     last_ = at;
@@ -1278,7 +1392,12 @@ void Figure::release(double px, double py, Button button, Modifiers)
     last_ = Point(px, py);
     if (drag_ == Drag::Band && button == Button::Right) {
         drag_ = Drag::None;
-        (void)camera_.zoomToRegion(pressed_.x(), pressed_.y(), px, py);
+        // A stated region is a reader who has already said where they are
+        // going, so it is said to the lines too (PlotSurface.zoomToRegion).
+        std::optional<GestureFocus> focus;
+        if (camera_.zoomToRegion(pressed_.x(), pressed_.y(), px, py, &focus) && focus.has_value()) {
+            source().focus(*focus);
+        }
         return;
     }
     if (drag_ == Drag::Pan && controlClick_ && !moved_) {

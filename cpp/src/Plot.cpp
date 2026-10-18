@@ -231,7 +231,7 @@ void Plot::clear()
     lines_.clear();
 }
 
-const std::string& Plot::name(int line) const
+std::string Plot::name(int line) const
 {
     return at(line).name;
 }

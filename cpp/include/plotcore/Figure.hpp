@@ -39,6 +39,7 @@
 // the gutter and move every x under the pointer that is dragging.
 
 #include "plotcore/Camera.hpp"
+#include "plotcore/LineSource.hpp"
 #include "plotcore/Palettes.hpp"
 #include "plotcore/Plot.hpp"
 #include "plotcore/Ticks.hpp"
@@ -224,6 +225,9 @@ struct DrawnLine
     std::vector<std::vector<Point>> runs;
     /// ...and as triangles, three points each, for one that fills them.
     std::vector<Point> triangles;
+    /// ...and as one triangle strip a run, two points a sample: the same
+    /// triangles at a third of the points, for a host that draws strips.
+    std::vector<std::vector<Point>> strips;
     /// Where a marker goes, when markers are on and the line is its samples.
     std::vector<Point> markers;
     double markerRadius = 2.0;
@@ -296,13 +300,76 @@ struct Scene
     Span y;
 };
 
+/// Which forms of the lines a scene carries. Each is the whole of every line
+/// again, and a scene of ten thousand lines is a great many points, so a host
+/// asks for the forms it draws and goes without the rest.
+struct SceneOptions
+{
+    bool runs = true;
+    bool triangles = true;
+    bool strips = false;
+    bool values = true;
+};
+
+/// A sample to draw the crosshair on, named rather than pointed at: the line,
+/// and the sample in the data's own units.
+struct PinnedSample
+{
+    int line = -1;
+    double x = 0.0;
+    double y = 0.0;
+};
+
+/// What a scene is asked for. The default is the pane as it stands.
+///
+/// A *picture* is the same figure laid out again for somewhere else -- the
+/// viewer's copied plot, at a size and in colours of the reader's choosing
+/// (PlotPicture.qml). It is not a second figure, because what it draws is
+/// exactly what the pane draws; it is the pane's lines in a frame of another
+/// size. So a picture asks the lines for nothing -- no new window, no new
+/// width, nothing for a source to fold or read on the picture's account --
+/// and is drawn from what they hold for the pane. Nobody is pointing at a
+/// picture and nobody is dragging across it: it has no band, and a reading
+/// only when one is pinned.
+struct SceneRequest
+{
+    SceneOptions geometry;
+    bool picture = false;
+    /// The picture's size in pane pixels and its pixel ratio; zero for the
+    /// pane's own.
+    double width = 0.0;
+    double height = 0.0;
+    double pixelRatio = 0.0;
+    /// The light scope's picture, whatever the settings say: the page's.
+    bool paper = false;
+    /// No ground at all, so a page's own colour shows through.
+    bool transparent = false;
+    /// The crosshair on this sample, placed by the picture's own axes
+    /// (PlotFrame.givenReading).
+    std::optional<PinnedSample> reading;
+};
+
 class Figure
 {
 public:
     Figure();
 
+    /// The figure's own lines, which it draws unless it is handed a source.
     [[nodiscard]] Plot& plot() { return plot_; }
     [[nodiscard]] const Plot& plot() const { return plot_; }
+    /// Draw the host's lines instead of its own -- or its own again, given
+    /// null. The source is the host's and must outlive the figure's use of it.
+    /// What is chosen about each line (lineSettings) is kept by the line's
+    /// number, which is the host's to keep in step with its lines.
+    void setSource(LineSource* source);
+    [[nodiscard]] LineSource& source()
+    {
+        return source_ != nullptr ? *source_ : static_cast<LineSource&>(plot_);
+    }
+    [[nodiscard]] const LineSource& source() const
+    {
+        return source_ != nullptr ? *source_ : static_cast<const LineSource&>(plot_);
+    }
     [[nodiscard]] Camera& camera() { return camera_; }
     [[nodiscard]] const Camera& camera() const { return camera_; }
 
@@ -312,9 +379,12 @@ public:
     /// in units have no reading that is both.
     void setSettings(const FigureSettings& settings);
 
-    /// Take a line away, and what was chosen about it with it: the lines
-    /// after it move down one, settings and all.
+    /// Take a line of the figure's own plot away, and what was chosen about it
+    /// with it: the lines after it move down one, settings and all. With a
+    /// source of the host's, the host has taken its line away already, and
+    /// this moves what was chosen about the lines after it down with them.
     void removeLine(int line);
+    /// Every line of its own plot, and everything chosen about any line.
     void clear();
 
     /// One line's settings; a line that has none yet gets the defaults.
@@ -352,7 +422,8 @@ public:
     void setViewRange(double x0, double x1, double y0, double y1);
 
     // --- the picture -------------------------------------------------------
-    [[nodiscard]] Scene scene();
+    [[nodiscard]] Scene scene() { return scene(SceneRequest{}); }
+    [[nodiscard]] Scene scene(const SceneRequest& request);
 
     /// The line drawn nearest (`px`, `py`), within `reach` pixels, or -1.
     [[nodiscard]] int lineAt(double px, double py, double reach = 12.0);
@@ -369,25 +440,43 @@ private:
     struct Layout;
     struct LineWindow;
 
-    void updateBounds();
-    [[nodiscard]] std::vector<int> drawnLines() const;
-    /// Whether a line is drawn on the common window, and whether its extent is
-    /// part of that window's whole -- which a moved line's still is.
-    [[nodiscard]] bool commonLine(int line) const;
-    [[nodiscard]] bool spansCommon(int line) const;
-    /// The window a line is drawn in; with `always`, the one it would have if
-    /// it were moved by nothing, which for a line on the common axis is that
-    /// axis's view.
-    [[nodiscard]] LineWindow windowOf(int line, int position, int drawn, bool always = false) const;
+    /// Ask the source which lines are drawn and what they span, once, and set
+    /// the axes' bounds from the answers. Every entry point that reads the
+    /// lines starts here, and nothing after it asks the source again for what
+    /// it holds: the viewer's Plot tab is ten thousand lines, and a question
+    /// asked per line inside a loop over the lines is a hundred million.
+    void refresh();
+    /// Whether the line drawn at `position` is drawn on the common window, and
+    /// whether its extent is part of that window's whole -- which a moved
+    /// line's still is.
+    [[nodiscard]] bool commonLine(int position) const;
+    [[nodiscard]] bool spansCommon(int position) const;
+    /// The window the line drawn at `position` is drawn in; with `always`, the
+    /// one it would have if it were moved by nothing, which for a line on the
+    /// common axis is that axis's view.
+    [[nodiscard]] LineWindow windowOf(int position, bool always = false) const;
+    /// Where a line is among those drawn, or -1.
+    [[nodiscard]] int positionOf(int line) const;
     [[nodiscard]] std::string reason() const;
     [[nodiscard]] double commonFraction(double value) const;
     [[nodiscard]] Layout layout() const;
     [[nodiscard]] PlotView paneView(const Layout& layout) const;
+    [[nodiscard]] Scene compose(const SceneRequest& request);
     void scaleLine(int line, double py, double factor);
     void shiftLine(int line, double dy);
     void ensureLine(int line);
 
     Plot plot_;
+    LineSource* source_ = nullptr;
+    /// What refresh() found about each line drawn, in drawing order.
+    struct Drawn
+    {
+        int line = -1;
+        LineExtent extent;
+        Span x;
+        double xPositive = 0.0;
+    };
+    std::vector<Drawn> drawn_;
     Camera camera_;
     FigureSettings settings_;
     std::vector<LineSettings> lines_;
