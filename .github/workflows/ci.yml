@@ -1,0 +1,365 @@
+# SPDX-FileCopyrightText: 2026 Jonas Sattler
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: CI
+
+# Every commit, on every branch, plus pull requests from forks. Built,
+# tested and uploaded as artefacts; nothing here publishes anything.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+# One run per ref, so three pushes in a minute leave one run going.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The library with plain CMake and whatever compiler the runner has: no Qt,
+  # no Python, no Rust. Then installed, and two projects built against the
+  # installed package -- one in C++ and one in C -- because a package that
+  # only works from inside its own build tree is not one. The install is the
+  # artefact: headers, the static core, the C library and the CMake package.
+  cpp:
+    name: C++ and C (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Configure
+        run: cmake -S . -B build/release -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build/release --config Release --parallel
+
+      - name: Test
+        run: ctest --test-dir build/release -C Release --output-on-failure --parallel 4
+
+      - name: Install, and build a project against what was installed
+        shell: bash
+        run: |
+          cmake --install build/release --config Release --prefix "$RUNNER_TEMP/plotcore"
+          mkdir -p "$RUNNER_TEMP/consumer"
+          cat > "$RUNNER_TEMP/consumer/CMakeLists.txt" <<'EOF'
+          cmake_minimum_required(VERSION 3.26)
+          project(consumer CXX)
+          find_package(plotcore 0.1 REQUIRED)
+          add_executable(consumer main.cpp)
+          target_link_libraries(consumer PRIVATE plotcore::core)
+          EOF
+          cat > "$RUNNER_TEMP/consumer/main.cpp" <<'EOF'
+          #include <plotcore/Pyramid.hpp>
+          #include <vector>
+          int main()
+          {
+              std::vector<double> line(100000, 1.0);
+              line[777] = 9.0;
+              const plotcore::LinePyramid pyramid = plotcore::pyramidOf(line.data(), 100000, 1);
+              std::vector<double> values;
+              std::vector<double> positions;
+              long long stride = 0;
+              double step = 0.0;
+              if (!plotcore::fillWhole(pyramid, 100, values, stride, step, &positions)) {
+                  return 3;
+              }
+              for (std::size_t i = 0; i < values.size(); ++i) {
+                  if (values[i] == 9.0) {
+                      return positions[i] == 777.0 ? 0 : 1;
+                  }
+              }
+              return 2;
+          }
+          EOF
+          cmake -S "$RUNNER_TEMP/consumer" -B "$RUNNER_TEMP/consumer/build" \
+            -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/plotcore" -DCMAKE_BUILD_TYPE=Release
+          cmake --build "$RUNNER_TEMP/consumer/build" --config Release
+          if [ -x "$RUNNER_TEMP/consumer/build/consumer" ]; then
+            "$RUNNER_TEMP/consumer/build/consumer"
+          else
+            "$RUNNER_TEMP/consumer/build/Release/consumer.exe"
+          fi
+
+      # ...and from C, through the one shared library the Python and Rust
+      # bindings load: its header, its import library and its exports, as an
+      # installed package rather than as a target in this tree.
+      - name: Build a C program against the installed C interface
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/cconsumer"
+          cat > "$RUNNER_TEMP/cconsumer/CMakeLists.txt" <<'EOF'
+          cmake_minimum_required(VERSION 3.26)
+          project(cconsumer C)
+          find_package(plotcore 0.1 REQUIRED)
+          add_executable(cconsumer main.c)
+          target_link_libraries(cconsumer PRIVATE plotcore::c)
+          EOF
+          cat > "$RUNNER_TEMP/cconsumer/main.c" <<'EOF'
+          #include <plotcore.h>
+          #include <stdio.h>
+          int main(void)
+          {
+              if (plotcore_abi_version() != PLOTCORE_ABI_VERSION) {
+                  return 1;
+              }
+              double line[1000];
+              for (int i = 0; i < 1000; ++i) {
+                  line[i] = i == 777 ? 9.0 : 1.0;
+              }
+              plotcore_figure* figure = plotcore_figure_new();
+              if (plotcore_add_line(figure, line, 1000, "spike", NULL) != PLOTCORE_OK) {
+                  return 2;
+              }
+              plotcore_set_size(figure, 640, 400, 1);
+              plotcore_scene* scene = plotcore_scene_new(figure);
+              const int drawn = scene != NULL && plotcore_scene_line_count(scene) == 1;
+              printf("plotcore %s: %s\n", plotcore_version(), drawn ? "drawn" : "not drawn");
+              plotcore_scene_free(scene);
+              plotcore_figure_free(figure);
+              return drawn ? 0 : 3;
+          }
+          EOF
+          cmake -S "$RUNNER_TEMP/cconsumer" -B "$RUNNER_TEMP/cconsumer/build" \
+            -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/plotcore" -DCMAKE_BUILD_TYPE=Release
+          cmake --build "$RUNNER_TEMP/cconsumer/build" --config Release
+          export PATH="$RUNNER_TEMP/plotcore/bin:$PATH"
+          export LD_LIBRARY_PATH="$RUNNER_TEMP/plotcore/lib:$RUNNER_TEMP/plotcore/lib64"
+          if [ -x "$RUNNER_TEMP/cconsumer/build/cconsumer" ]; then
+            "$RUNNER_TEMP/cconsumer/build/cconsumer"
+          else
+            "$RUNNER_TEMP/cconsumer/build/Release/cconsumer.exe"
+          fi
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: plotcore-sdk-${{ runner.os }}
+          path: ${{ runner.temp }}/plotcore
+
+  # The Qt adapter and the example that walks every feature on it, against
+  # the Qt the AppImage carries -- 6.8, the last whose Linux binaries need no
+  # more than glibc 2.28 -- and its self-test run offscreen by ctest. On
+  # Windows the example is then deployed beside the Qt it needs and run again
+  # from there with Qt off the PATH, so that what is uploaded is what was
+  # seen to start.
+  qt:
+    name: Qt example (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: jurplel/install-qt-action@v4.4.1
+        with:
+          version: "6.8.3"
+          aqtversion: "==3.3.0"
+          cache: true
+
+      - name: Configure
+        run: cmake -S . -B build/qt -DCMAKE_BUILD_TYPE=Release -DPLOTCORE_WITH_QT=ON
+
+      - name: Build
+        run: cmake --build build/qt --config Release --parallel
+
+      - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --test-dir build/qt -C Release --output-on-failure --parallel 4
+
+      - name: Deploy the example beside its Qt
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $out = "plotcore-qt-demo"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          Copy-Item build/qt/examples/qt/Release/plotcore-qt-demo.exe $out
+          windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw "$out/plotcore-qt-demo.exe"
+          # The C++ runtime Qt and the example were built against: a machine
+          # without the Visual C++ redistributable has none of it.
+          $vswhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
+          $crt = & $vswhere -latest -find "VC/Redist/MSVC/*/x64/Microsoft.VC*.CRT" | Select-Object -Last 1
+          Copy-Item "$crt/*.dll" $out
+          Copy-Item LICENSE $out
+          Get-ChildItem $out -Name
+
+      - name: The deployed example starts on its own
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          $env:PATH = "$env:SystemRoot\system32;$env:SystemRoot"
+          Remove-Item Env:QT_PLUGIN_PATH -ErrorAction SilentlyContinue
+          ./plotcore-qt-demo/plotcore-qt-demo.exe --self-test | Select-Object -Last 1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - uses: actions/upload-artifact@v7
+        if: runner.os == 'Windows'
+        with:
+          name: plotcore-qt-demo-Windows
+          path: plotcore-qt-demo
+
+  # plotcore for Python: the wheel built as it would be shipped -- on Linux in
+  # the manylinux_2_28 image, which is the RHEL 8 floor's glibc, and repaired
+  # to that tag -- then installed on a plain runner and tested, PyQt6 and
+  # matplotlib included, against the golden digest the C test wrote. Uploaded
+  # as an artefact beside the PyQt6 example, and published nowhere; the
+  # Linux one is also what the PyQt6 demo's AppImage carries.
+  python:
+    name: plotcore for Python (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build the wheel (manylinux_2_28)
+        if: runner.os == 'Linux'
+        run: |
+          docker run --rm -v "$PWD:/io" -w /io quay.io/pypa/manylinux_2_28_x86_64 bash -c '
+            set -e
+            /opt/python/cp312-cp312/bin/python -m pip wheel ./python -w /tmp/dist
+            auditwheel repair /tmp/dist/plotcore-*.whl -w /io/wheelhouse
+            chmod -R a+rwX /io/wheelhouse'
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Build the wheel (Windows)
+        if: runner.os == 'Windows'
+        run: python -m pip wheel ./python -w wheelhouse
+
+      # What PyQt6's own Qt needs from the system to start offscreen.
+      - name: Install what Qt needs
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libxkbcommon0 libfontconfig1 libdbus-1-3 libgl1
+
+      - name: Install the wheel
+        shell: bash
+        run: |
+          python -m pip install wheelhouse/plotcore-*.whl
+          python -m pip install pytest PyQt6 matplotlib
+
+      - name: Test
+        shell: bash
+        env:
+          QT_QPA_PLATFORM: offscreen
+        # From outside the source tree, so the package imported is the one
+        # installed and not python/src.
+        run: |
+          cd "$RUNNER_TEMP"
+          python -m pytest -q "$GITHUB_WORKSPACE/python/tests"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: plotcore-python-${{ runner.os }}
+          path: |
+            wheelhouse/*.whl
+            examples/pyqt6/*.py
+
+  # plotcore for Rust: the workspace at the toolchain rust-toolchain.toml pins,
+  # formatted, linted with warnings as errors, and tested -- the golden digest,
+  # the egui adapter driven headless, and the example's walk of every feature,
+  # which needs no display because it drives egui without a window. The
+  # example is uploaded from Windows; Linux gets it as an AppImage below.
+  rust:
+    name: plotcore for Rust (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v7
+
+      # What winit and the clipboard link against to build at all.
+      - name: Install what eframe needs
+        if: runner.os == 'Linux'
+        working-directory: .
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libxcb-render0-dev libxcb-shape0-dev \
+                                  libxcb-xfixes0-dev libwayland-dev
+
+      # With no name, rustup installs the one rust-toolchain.toml pins.
+      - name: Toolchain
+        run: rustup toolchain install && rustup show active-toolchain
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Lint
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace --locked
+
+
+      - name: Build the example
+        if: runner.os == 'Windows'
+        run: cargo build --release --locked -p egui-demo
+
+      - uses: actions/upload-artifact@v7
+        if: runner.os == 'Windows'
+        with:
+          name: plotcore-egui-demo-Windows
+          path: rust/target/release/egui-demo.exe
+
+  # All three examples as AppImages at H5Scope's floor, RHEL 8. Built and
+  # checked inside manylinux_2_28 (AlmaLinux 8) by packaging/appimage, the
+  # PyQt6 one around the wheel the job above tested; then each self-test run
+  # again on a stock AlmaLinux 8 under X11 -- no EPEL, so nothing the images
+  # say they carry can be on the host by accident -- and on this runner's
+  # Ubuntu, offscreen.
+  appimages:
+    name: Demo AppImages (RHEL 8 floor)
+    runs-on: ubuntu-latest
+    needs: python
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: plotcore-python-Linux
+          path: python-artifact
+
+      - name: Build and check them in manylinux_2_28
+        run: |
+          wheel="$(ls python-artifact/wheelhouse/plotcore-*.whl)"
+          docker run --rm -v "$PWD:/io" -w /io quay.io/pypa/manylinux_2_28_x86_64 \
+            bash packaging/appimage/in-container.sh "$wheel" dist
+
+      - name: On a stock RHEL 8, under X11
+        run: |
+          docker run --rm -v "$PWD:/io" -w /io almalinux:8 \
+            bash packaging/appimage/try-on-rhel8.sh dist
+
+      # What PyQt6's Qt needs from the system to start offscreen; the egui and
+      # Qt images need no more than this either.
+      - name: On this runner's Ubuntu
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: 1
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          sudo apt-get update && sudo apt-get install -y libegl1 libfontconfig1 libdbus-1-3 libgl1
+          for image in dist/*.AppImage; do
+            echo "== $image"
+            "$image" --self-test | tail -1
+          done
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: plotcore-demos-AppImage
+          path: dist/*.AppImage

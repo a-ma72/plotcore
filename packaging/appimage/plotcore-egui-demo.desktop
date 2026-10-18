@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=plotcore egui demo
+GenericName=Plot demo
+Comment=Every feature of the plotcore plotting library on one egui window
+Exec=plotcore-egui-demo
+Icon=plotcore
+Terminal=false
+Categories=Science;DataVisualization;
+Keywords=plot;envelope;zoom;oscilloscope;signal;
+StartupNotify=true

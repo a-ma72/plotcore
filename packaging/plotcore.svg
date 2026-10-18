@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-FileCopyrightText: 2026 Jonas Sattler -->
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<!-- The demos' icon: a trace with one spike the envelope kept, on the plot's
+     own dark ground, in the first colour of the cycle a plot opens on. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <rect x="8" y="8" width="240" height="240" rx="40" fill="#101114"/>
+  <g stroke="#2a2d33" stroke-width="3">
+    <line x1="40" y1="76" x2="216" y2="76"/>
+    <line x1="40" y1="128" x2="216" y2="128"/>
+    <line x1="40" y1="180" x2="216" y2="180"/>
+  </g>
+  <polyline fill="none" stroke="#e69f00" stroke-width="12" stroke-linecap="round"
+            stroke-linejoin="round"
+            points="40,160 64,148 86,166 108,142 124,150 136,44 148,170 168,138 190,156 216,132"/>
+</svg>
