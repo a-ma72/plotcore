@@ -11,9 +11,9 @@
 #include <cstring>
 #include <numbers>
 
-// The functions of the same names in src/qml/PlotSurface.qml, with the state
-// PlotSurface reads off its own properties passed in. The arguments for each
-// are written over the QML.
+// The functions of the same names in H5Scope's src/qml/PlotSurface.qml, with
+// the state PlotSurface reads off its own properties passed in. The arguments
+// for each are written over the QML.
 
 namespace plotcore {
 

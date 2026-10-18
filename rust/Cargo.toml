@@ -20,7 +20,7 @@ edition = "2021"
 rust-version = "1.95"
 license = "GPL-3.0-only"
 authors = ["Jonas Sattler", "Andreas Martin"]
-repository = "https://github.com/jonassattler/H5Scope"
+repository = "https://github.com/jonassattler/plotcore"
 
 [workspace.dependencies]
 plotcore-sys = { path = "plotcore-sys" }

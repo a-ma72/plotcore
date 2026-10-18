@@ -7,14 +7,14 @@
 // in -- the viewer's Theme.qml and PlotSurface.seriesColor, as data and
 // arithmetic.
 //
-// The palettes are two kinds of thing, held to two rules (CLAUDE.md, invariant
-// 5). `spectrum` and `safe` were generated against the viewer's two grounds,
+// The palettes are two kinds of thing, held to two rules (H5Scope's CLAUDE.md,
+// invariant 5). `spectrum` and `safe` were generated against the viewer's two grounds,
 // so every entry clears 3:1 on both. `okabe-ito`, `tol bright` and `tol muted`
 // are the published cycles at their published values, so a figure from here
 // and one from matplotlib agree about which line is which -- with Okabe-Ito's
 // black drawn last rather than first, and drawn white on the dark ground,
-// where black is the ground itself. tst_plotcore_parity.qml holds every stop
-// here to Theme.qml's.
+// where black is the ground itself. H5Scope's tst_plotcore_parity.qml holds
+// every stop here to Theme.qml's.
 //
 // "Paper" is the light scope: a picture exported for a page is drawn as the
 // light theme would draw it, whatever is on screen. A palette is read against

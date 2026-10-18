@@ -247,7 +247,7 @@ def _library_path() -> Path:
             return here / name
     raise ImportError(
         f"plotcore's C library is not beside {here}; install the package, or set "
-        "PLOTCORE_LIBRARY to a libplotcore_c built from plotcore/CMakeLists.txt"
+        "PLOTCORE_LIBRARY to a libplotcore_c built from https://github.com/jonassattler/plotcore"
     )
 
 

@@ -3,7 +3,7 @@
 
 //! plotcore.h, declared for Rust.
 //!
-//! Written out once from `plotcore/capi/plotcore.h` and checked in, so building
+//! Written out once from `capi/plotcore.h` and checked in, so building
 //! this needs a C++ compiler and nothing else -- no libclang. They follow the
 //! header line for line: a change to one is a change to the other, and
 //! `PLOTCORE_ABI_VERSION` is what says they are the same. The safe interface

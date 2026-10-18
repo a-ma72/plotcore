@@ -39,8 +39,8 @@
 // where the fold finds the element anyway, every answer is a copy.
 //
 // No Qt anywhere in it, for Projection.hpp's reason: it is arithmetic over
-// doubles and plotcore/tests/test_plotlevels.cpp asserts it with no file, no
-// thread and no window. The build is the one part worth spreading over the
+// doubles and tests/test_plotlevels.cpp asserts it with no file, no thread
+// and no window. The build is the one part worth spreading over the
 // machine, and it goes over the pool in Parallel.hpp.
 
 #include "plotcore/Levels.hpp"

@@ -315,7 +315,7 @@ std::vector<int> Figure::drawnLines() const
 bool Figure::commonLine(int line) const
 {
     // A line on an axis of its own needs a second line to be beside: the
-    // request is kept, so a second line brings the axis back. See CLAUDE.md.
+    // request is kept, so a second line brings the axis back. See H5Scope's CLAUDE.md.
     if (drawnLines().size() < 2) {
         return true;
     }

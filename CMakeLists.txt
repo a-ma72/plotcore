@@ -110,17 +110,25 @@ if(PLOTCORE_BUILD_CAPI)
   target_link_libraries(plotcore_c PRIVATE plotcore::core)
   if(NOT MSVC AND NOT APPLE)
     # One file to hand to Python or Rust: the C++ runtime inside it rather
-    # than beside it, for the release floor's reason (CLAUDE.md, invariant 4).
+    # than beside it, for the release floor's reason (CLAUDE.md, "The floor").
     target_link_options(plotcore_c PRIVATE -static-libstdc++ -static-libgcc
                         LINKER:--exclude-libs,ALL)
   endif()
 endif()
 
+# Before anything that adds a test: enable_testing() only reaches the
+# directories added after it. The Qt example's self-test is added under
+# examples/qt, and was registered nowhere while this came after it -- H5Scope's
+# include(CTest), which runs before it adds this project, was hiding that.
+if(PLOTCORE_BUILD_TESTS)
+  enable_testing()
+endif()
+
 # --- the Qt adapter -------------------------------------------------------
 # plotcore::Figure in a QWidget, and the example that walks every feature on
 # one. Off unless asked for, because it is the one part of this project that
-# needs a toolkit; the viewer asks for it, so CI builds and runs it against the
-# viewer's own Qt.
+# needs a toolkit. CI builds it against a stock Qt on Linux and Windows, runs
+# the example's self-test, and packs the example as an AppImage.
 option(PLOTCORE_WITH_QT "Build plotcore::qt and its example" OFF)
 if(PLOTCORE_WITH_QT)
   find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets)
@@ -139,12 +147,11 @@ if(PLOTCORE_WITH_QT)
 endif()
 
 if(PLOTCORE_BUILD_TESTS)
-  enable_testing()
   add_subdirectory(tests)
 endif()
 
 # --- a Python wheel ---------------------------------------------------------
-# scikit-build-core, from plotcore/python/pyproject.toml: the C interface and
+# scikit-build-core, from python/pyproject.toml: the C interface and
 # nothing else, beside the package that loads it with ctypes. It links no
 # Python, which is what lets one wheel per platform serve every version.
 if(SKBUILD)

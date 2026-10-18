@@ -25,7 +25,7 @@ const SOURCES: &[&str] = &[
 
 fn main() {
     let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("cargo sets it"));
-    // plotcore/rust/plotcore-sys -> plotcore
+    // rust/plotcore-sys -> the repository's root
     let root = manifest.join("../..");
     let version = std::env::var("CARGO_PKG_VERSION").expect("cargo sets it");
 

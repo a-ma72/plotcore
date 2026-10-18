@@ -28,7 +28,7 @@ matplotlib = ["matplotlib>=3.7"]
 test = ["pytest>=7"]
 
 [project.urls]
-Source = "https://github.com/jonassattler/H5Scope"
+Source = "https://github.com/jonassattler/plotcore"
 
 [tool.scikit-build]
 # The library is plotcore's own CMake project one directory up, built as the

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Jonas Sattler
 # SPDX-License-Identifier: GPL-3.0-only
 
-"""plotcore/tests/golden/script.txt, run through the Python binding.
+"""tests/golden/script.txt, run through the Python binding.
 
 The language is golden/README.md's, and so is the digest: test_capi.c writes
 it from C, this writes it from Python, and the two must agree token for token

@@ -152,7 +152,7 @@ struct LineSettings
     /// A colour of its own, over whatever cycle is in force.
     std::optional<Rgba> colour;
     /// On a y axis of its own: the line alone, linear, zoomed by the common
-    /// axis's share. See CLAUDE.md, "A line of a custom tab may also be drawn
+    /// axis's share. See H5Scope's CLAUDE.md, "A line of a custom tab may also be drawn
     /// against a y axis of its own".
     bool ownAxis = false;
     /// ...and left at its whole extent whatever the zoom.

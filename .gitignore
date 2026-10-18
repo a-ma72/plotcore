@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: 2026 Jonas Sattler
+# SPDX-License-Identifier: GPL-3.0-only
+
+build/
+# Where packaging/appimage writes, and where CI picks the AppImages up.
+dist/
+# Where a wheel is built to, locally and in CI.
+wheelhouse/
+CMakeUserPresets.json
+compile_commands.json
+.cache/
+
+# Where cargo builds rust/.
+/rust/target/
+
+# What Python leaves behind running python/ and its tests.
+__pycache__/
+.pytest_cache/
+*.egg-info/
+
+# Agent configuration, local to this checkout.
+.claude/

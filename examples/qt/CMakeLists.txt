@@ -11,9 +11,14 @@ qt_add_executable(plotcore-qt-demo
   Signals.hpp
 )
 target_link_libraries(plotcore-qt-demo PRIVATE plotcore::qt)
+# DemoWindow is a Q_OBJECT. Said here rather than inherited: H5Scope turns
+# AUTOMOC on for every target it builds, which is how this example linked
+# there for as long as it was only ever built there, and failed to link the
+# first time it was built anywhere else.
+set_target_properties(plotcore-qt-demo PROPERTIES AUTOMOC ON)
 
-# A static Qt resolves its platform plugins at link time (CLAUDE.md, invariant
-# 3): the ones this platform's Qt built, and offscreen for the self-test.
+# A static Qt -- H5Scope's is one -- resolves its platform plugins at link
+# time: the ones this platform's Qt built, and offscreen for the self-test.
 get_target_property(plotcore_qt_type Qt6::Core TYPE)
 if(plotcore_qt_type STREQUAL "STATIC_LIBRARY")
   set(plotcore_qt_plugins "")

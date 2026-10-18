@@ -11,11 +11,12 @@
 #include <limits>
 #include <numbers>
 
-// Every function here is the one of the same name in src/qml/PlotFrame.qml,
-// with JavaScript's arithmetic spelt out where C++'s differs: Math.round is
-// jsRound, `%` on numbers is fmod, `.length` of a label is textLength, and a
-// number is written by Format.hpp rather than by printf. The arguments for
-// each rule are written over the QML; they are not repeated here.
+// Every function here is the one of the same name in H5Scope's
+// src/qml/PlotFrame.qml, with JavaScript's arithmetic spelt out where C++'s
+// differs: Math.round is jsRound, `%` on numbers is fmod, `.length` of a label
+// is textLength, and a number is written by Format.hpp rather than by printf.
+// The arguments for each rule are written over the QML; they are not repeated
+// here.
 
 namespace plotcore {
 namespace {

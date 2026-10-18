@@ -1,0 +1,205 @@
+# plotcore — working notes for Claude
+
+The plot H5Scope draws, as a library: C++20 with no dependencies, a C
+interface over it, and Python and Rust libraries over that, each with an
+example that walks every feature. GPL-3.0-only.
+
+"The viewer" everywhere in this repository is
+[H5Scope](https://github.com/jonassattler/H5Scope), which pins this repository
+as a git submodule at `plotcore/` and is where the library came from. The
+history before 2026-10-18 is H5Scope's, filtered down to these files, and a
+`jonassattler/H5Scope#N` in an old commit message is that repository's pull
+request.
+
+The code is heavily commented on purpose — most files open with an argument
+for why they are the way they are, usually naming the failure that motivated
+them. Read those headers before changing the code under them; they are the
+design record. `Projection.hpp`, `Levels.hpp` and `Pyramid.hpp` above all.
+
+## Build and test
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release     # no Qt, no Python, no Rust
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
+```
+
+- `-DPLOTCORE_WITH_QT=ON -DCMAKE_PREFIX_PATH=<qt>` adds the widget and the Qt
+  example, whose `--self-test` is the `plotcore_qt_demo` ctest test; run it
+  with `QT_QPA_PLATFORM=offscreen`.
+- **Python:** `pip install ./python` builds the wheel (scikit-build-core, from
+  the CMake project one directory up), then `pytest python/tests` from
+  *outside* the source tree, so that what is imported is what was installed.
+  Against a C library built by hand: `PLOTCORE_LIBRARY=build/libplotcore_c.so`.
+- **Rust:** in `rust/`, `cargo fmt --all --check`,
+  `cargo clippy --workspace --all-targets --locked -- -D warnings`,
+  `cargo test --workspace --locked`. CI runs exactly those three.
+- **AppImages:** `packaging/appimage/{qt,egui,pyqt6}-demo.sh` build one each and
+  `verify.sh` checks one. They run anywhere, but only hold the RHEL 8 floor
+  when run inside manylinux_2_28, which is what `in-container.sh` is for. Off a
+  floor-sized machine, `verify.sh` fails on the floor and nothing else.
+
+CI is `.github/workflows/ci.yml`: C++ and C, the Qt example, Python and Rust on
+Linux and Windows, then the AppImages. It builds, tests and uploads artefacts;
+it publishes nothing.
+
+## Layout
+
+| Path | What it is |
+|---|---|
+| `include/plotcore/`, `src/` | `plotcore::core`. The arithmetic: `Projection` (where a sample lands, gaps, the thinning, strokes as triangles), `Levels` (the fold and the policy over held runs), `Pyramid` (what every run is folded out of), `Budget` (what may be held), `Parallel` (the pool a large fold is spread over). The frame: `Format`, `Ticks`, `Camera`, `Palettes`. Then `Plot` (lines held) and `Figure` (the whole plot a host drives). `src/Json.*` is private. |
+| `capi/` | `plotcore.h`, `Figure` as C, built as `plotcore_c`. |
+| `qt/` | `plotcore::qt`, a `QWidget` over a `Figure`. |
+| `python/` | The package (`src/plotcore`: `_native.py`, `figure.py`, `scene.py`, `qt.py`, `mpl.py`) and its tests. |
+| `rust/` | `plotcore-sys`, `plotcore`, `plotcore-egui`, `egui-demo`. |
+| `examples/` | `qt/` and `pyqt6/`. |
+| `tests/` | Catch2 suites (`test_plotprojection`, `test_plotlevels`, `test_plotfigure`), `test_capi.c`, and `golden/`. |
+| `packaging/` | The icon, and `appimage/`. |
+
+## plotcore and H5Scope
+
+H5Scope builds this with `add_subdirectory(plotcore)` and links
+`plotcore::core`; its own build also runs this repository's C++ tests, on its
+RHEL 8 and MSVC toolchains. It uses the public headers and nothing else. Three
+consequences:
+
+- **A change here reaches the viewer when the viewer moves its pin.** That is
+  an H5Scope pull request of its own (`git -C plotcore checkout <sha>`, commit
+  the pointer), and it is where H5Scope's suite — `test_cost`,
+  `test_customplot`, the parity suite — runs against the change. A change that
+  needs the viewer to change with it lands here first, then in H5Scope with
+  the pin.
+- **`Format`, `Ticks`, `Camera` and `Palettes` are ports**, of H5Scope's
+  `PlotFrame.qml`, `PlotSurface.qml` and `Theme.qml`, and H5Scope's
+  `tests/qml/tst_plotcore_parity.qml` asks both the same questions and compares
+  the answers exactly — values bit for bit, labels character for character,
+  colours to a sixteen-bit step, JavaScript's own number formatting included.
+  **A change to how an axis is numbered, ruled, zoomed or coloured is a change
+  to both, or the parity suite fails when the pin moves.** The arguments for
+  each rule are written over the QML, not repeated here.
+- **The rules of the plot itself are written in H5Scope's CLAUDE.md** — the
+  separate axes, the logarithmic axis and its edges, why a log x is folded per
+  column, why an extreme is drawn at its element, what a zoom may read — and
+  comments here point there. They are the viewer's behaviour, and this library
+  is how the viewer has it.
+
+## plotcore as a library
+
+Four layers above the arithmetic, each the only place its question is
+answered:
+
+- **`Format`, `Ticks`, `Camera`, `Palettes`** — the ports above.
+- **`Plot`** holds lines: copied in (the pyramid *is* the copy) or streamed
+  through `PyramidBuilder`, at the base the budget affords, with an optional
+  `LineReader` below it. Every picture is a fold of what is held; with no
+  reader, a window finer than the base is drawn *at* the base rather than from
+  the whole-line summary.
+- **`Figure`** is the whole plot a host drives: lines, settings, the camera,
+  the gestures, and a `Scene` out — strokes, rules and text in pane pixels with
+  y down, flipping already applied. A host measures text, forwards events and
+  paints; it decides nothing. Three things are this layer's own, all from
+  jonassattler/H5Scope#30 and all about a line: **moved and scaled**
+  (`LineSettings::scale`/`shift`, Alt-drag, Alt+Control+wheel, Control-click to
+  put back), **stacked** in bands, and **a time per line**. A moved line stays
+  in the common axis's extent and is numbered on it — an axis appearing beside
+  the pane on the first pixel of a drag widened the gutter and moved every x
+  under the pointer — and only a line on an axis of its own, or stacked, is
+  numbered beside the pane. `state()`/`restore()` write a view as JSON
+  (`src/Json.*`), passing over what they cannot read as the viewer's saved
+  views do.
+- **`capi/plotcore.h`** is `Figure` as C, built as one shared library
+  (`plotcore_c`, exporting nothing else, its C++ runtime linked in). Settings
+  are **named, not laid out** — `plotcore_set_bool(f, "xLog", 1)`, the names a
+  saved view writes — so a new setting is a new name and not a new ABI.
+  Nothing is borrowed across it, every failure is a status with
+  `plotcore_last_error()` beside it, and `test_capi.c` is compiled as C.
+
+`tests/golden/` is what holds the three languages to one plot: a script of
+settings and gestures, and the digest of every scene it asks for. `test_capi`
+writes it (`--write`) and checks it; the Python and Rust tests check the same
+file through their own bindings. **A changed line in `expected.txt` is a
+changed picture**, so read the diff before committing one.
+
+`qt/` is a `QWidget` over a `Figure`, and `examples/qt` walks every feature on
+one window; `--self-test` walks them itself offscreen.
+
+`python/` is ctypes over the C interface (`_native.py` declares the header line
+for line and checks the ABI version before anything is called), so it links no
+Python and one `py3-none` wheel per platform serves every version.
+scikit-build-core builds it from the CMake project one directory up
+(`cmake.source-dir = ".."`, the `SKBUILD` block in `CMakeLists.txt`), which is
+also why the wheel is built from the repository and not from an sdist. Two
+rules from the boundary: **a scene is copied out whole** into numpy, so nothing
+Python holds points into the library; and **a reader's callback is kept by the
+token the C side holds**, released when the C side says it has let go of it,
+which is the only moment index bookkeeping in Python could not get wrong.
+`plotcore.qt` is the PyQt6 widget, `plotcore.mpl` draws on matplotlib's own
+axes from each run's data-unit values (`plotcore_scene_line_run_values`) with
+the figure's gestures under them, and `examples/pyqt6/demo.py --self-test` is
+the Qt example's walk, run by `python/tests/test_qt.py`.
+
+`rust/` is the workspace: `plotcore-sys` compiles `src/` and `capi/` with the
+`cc` crate and declares the header by hand (no libclang), and its test holds
+every structure's size to what the C compiler that built the library makes of
+it, because working them out by hand got two of them wrong; `plotcore` is the
+safe wrapper, whose readers and text measure are boxed and handed to the C side
+as contexts it gives back; `plotcore-egui` paints a scene as plotcore's
+triangles or as feathered polylines and hands egui's raw input events over as
+gestures; `egui-demo` walks every feature, and its `--self-test` drives egui
+headless, so `cargo test` needs no display. Because `plotcore-sys` reaches
+`../../src`, a crate is built from this repository and is not publishable as it
+stands.
+
+## The floor
+
+What this repository ships for Linux starts on RHEL 8 — glibc 2.28 — as
+H5Scope does, and it is held in three places:
+
+- **`plotcore_c`** links its C++ runtime in (`-static-libstdc++`), because a
+  wheel's library is loaded by whatever Python is on the machine. The wheel is
+  built in manylinux_2_28 and repaired to that tag by auditwheel.
+- **The AppImages** are built in manylinux_2_28 against libraries from
+  AlmaLinux 8 and EPEL 8, on Qt 6.8 (6.11's binaries need glibc 2.34) and on
+  PyQt6 6.9 (6.10's wheels are manylinux_2_34). They link the C++ runtime
+  dynamically, as a prebuilt Qt does, and gcc-toolset is what makes that safe:
+  it builds against the host's libstdc++ plus a static archive of what is
+  newer. `check-floor.sh` reads every ELF file in each image back against
+  glibc 2.28 and GCC 8's libstdc++, and `try-on-rhel8.sh` runs each on a stock
+  AlmaLinux 8 under X11.
+- **What an image leaves to the host is one list**, `HOST_LIBRARIES` in
+  `packaging/appimage/common.sh` — glibc, the GL and driver stack, core X11 and
+  the Wayland client, fontconfig — and linuxdeploy's own list is overruled by
+  it. libxcb-cursor is the library both Qt images exist to carry: Qt 6.5 and
+  newer link the xcb plugin against it, and RHEL 8 has it only in EPEL.
+
+## Conventions
+
+- SPDX header on every file: `SPDX-FileCopyrightText: 2026 Jonas Sattler` (and
+  `2026 Andreas Martin` beside it on files derived from his work in
+  jonassattler/H5Scope#30) and `SPDX-License-Identifier: GPL-3.0-only`.
+- `.clang-format` (LLVM base, 100 columns, 4 spaces) and `.clang-tidy` — match
+  them. `cargo fmt` and `rustfmt.toml` for Rust.
+- Doc comments are `///` on the declaration; `//` blocks above a decision
+  explain *why*, and name the failure that prompted it when there was one.
+  Never strip an existing comment to "clean up" — those paragraphs are
+  load-bearing.
+- Test names are sentences: `TEST_CASE("a spike on a bucket's last sample is
+  drawn at that sample")`, `def test_the_golden_script_draws_the_c_digest()`.
+- Assert behaviour in counts, not durations: a duration measures the machine, a
+  count measures the program.
+- Commit messages: a lower-case-ish imperative sentence as the subject, then a
+  body that argues the change — what was observed, what was measured, what was
+  decided against. Wrapped at ~72.
+
+## Gotchas
+
+- **Never ask a figure for a scene inside a closure that holds egui's
+  context** — the text measure calls back into `ctx.fonts_mut`, which takes the
+  same lock.
+- The Rust toolchain is pinned in `rust/rust-toolchain.toml` (egui 0.37's
+  minimum), so that CI and a reader's machine run the same clippy.
+- A Qt target here says `AUTOMOC ON` itself. H5Scope turns it on for every
+  target it builds, which is how the Qt example linked there and nowhere else
+  until this repository built it alone.
+- Headless Qt needs `QT_QPA_PLATFORM=offscreen`; every AppImage runs with
+  `APPIMAGE_EXTRACT_AND_RUN=1` wherever there is no FUSE, CI included.

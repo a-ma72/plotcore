@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Jonas Sattler
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! One plot in three languages: plotcore/tests/golden/script.txt run through
+//! One plot in three languages: tests/golden/script.txt run through
 //! the Rust binding must write the digest test_capi.c wrote from C. The
 //! language and the digest are golden/README.md's.
 

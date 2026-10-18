@@ -7,11 +7,11 @@
 //
 // A port of the viewer's PlotFrame.qml, function for function and under the
 // same names, so that a library drawing a plot numbers it exactly as the
-// application does. Exactly is the word: tests/qml/tst_plotcore_parity.qml runs
-// these and the QML over the same table of views and compares every value and
-// every label, because two ways of numbering one axis are two answers to
-// "where is this", and the first time they disagreed would be the first time
-// anybody noticed.
+// application does. Exactly is the word: H5Scope's
+// tests/qml/tst_plotcore_parity.qml runs these and the QML over the same table
+// of views and compares every value and every label, because two ways of
+// numbering one axis are two answers to "where is this", and the first time
+// they disagreed would be the first time anybody noticed.
 //
 // The logarithmic half is matplotlib's -- LogLocator and LogFormatterSciNotation
 // as they stand in 3.11, ported rather than reasoned out again, with the two

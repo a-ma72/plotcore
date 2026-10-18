@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2026 Jonas Sattler
+# SPDX-License-Identifier: GPL-3.0-only
+
+# Line endings, settled here rather than left to whoever cloned this.
+#
+# The GitHub Actions Windows runner image sets core.autocrlf=true globally, so
+# without this every text file arrives in the working tree with CRLF endings.
+# Two things here would notice: tests/golden/expected.txt is compared line for
+# line by three test suites, and a shell script whose shebang ends in \r names
+# an interpreter that does not exist.
+#
+# LF everywhere, then -- in the repository and in the working tree, on both
+# platforms. MSVC, rustc and Python all read LF sources.
+* text=auto eol=lf
+
+# Named rather than left to git's own detection.
+*.png  binary
+*.ico  binary
