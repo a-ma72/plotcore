@@ -32,7 +32,10 @@ if (-not $dumpbin) {
 # bundle. Asked of the files rather than of a run, because the runner has the
 # redistributable installed and would start a bundle that carries none of it.
 # Matched by prefix, so that a copy a wheel renamed (msvcp140-<hash>.dll) is
-# matched against itself.
+# matched against itself. What a file delay-loads counts as well: dumpbin
+# lists it with the rest, and it is how the PyQt6 bundle was found without
+# the concrt140.dll its msvcp140.dll delay-loads, which PyInstaller does not
+# follow.
 Write-Host '-- the C++ runtime it needs, it carries'
 $runtime = '^(vcruntime|msvcp|concrt|vccorlib|vcomp)[^\\/]*\.dll$'
 $carried = @{}

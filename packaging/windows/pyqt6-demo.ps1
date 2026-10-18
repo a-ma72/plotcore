@@ -43,6 +43,13 @@ try {
     # what goes in.
     & $python -I -m pip install --no-cache-dir --disable-pip-version-check `
         -r "$demo/requirements.txt" $wheelPath @pyinstaller
+    # PyInstaller follows what a DLL imports but not what it delay-loads, and
+    # the msvcp140.dll PyQt6 ships delay-loads concrt140.dll: the wheel carries
+    # it beside msvcp140.dll, and the bundle left it out until verify.ps1 said
+    # so. Collected by name, beside the Visual C++ runtime PyInstaller
+    # collects for Python itself.
+    $concrt = & $python -I -c `
+        "import pathlib, PyQt6; print(pathlib.Path(PyQt6.__file__).parent / 'Qt6' / 'bin' / 'concrt140.dll')"
     # The icon is a PNG, which PyInstaller converts with Pillow -- installed
     # already, because matplotlib needs it.
     & $python -I -m PyInstaller --noconfirm --clean --log-level WARN `
@@ -50,6 +57,7 @@ try {
         --name plotcore-pyqt6-demo `
         --icon "$root/packaging/plotcore.png" `
         --collect-binaries plotcore `
+        --add-binary "$concrt;." `
         --distpath $dist `
         --workpath "$work/build" `
         --specpath $work `
