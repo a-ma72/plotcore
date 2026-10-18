@@ -5,7 +5,7 @@
 [package]
 name = "plotcore"
 description = "The plot H5Scope draws: an envelope that keeps every spike, zoomed without rereading, with its axes, gestures and colours."
-# The golden test reads golden/ at the repository's root, which a published
+# The golden test reads golden/ at the repository's root, which a packaged
 # crate has no copy of.
 exclude = ["tests/golden.rs"]
 version.workspace = true

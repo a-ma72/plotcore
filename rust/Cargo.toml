@@ -6,9 +6,10 @@
 # example that walks every feature on one window (egui-demo).
 #
 # plotcore-sys compiles the C++ core and the C interface with the cc crate,
-# through links to cpp/ and c/ that cargo follows when it packages it: the
-# crate on crates.io carries those sources, and the three libraries are
-# published there together (.github/workflows/release.yml).
+# through links to cpp/ and c/ that cargo follows when it packages it, so a
+# packaged crate carries those sources and could be published. None is: the
+# crates are used from this repository, as a git dependency on a release's
+# tag (README.md).
 
 [workspace]
 resolver = "2"
@@ -24,7 +25,7 @@ repository = "https://github.com/jonassattler/plotcore"
 readme = "README.md"
 
 [workspace.dependencies]
-# A version beside each path, because a published crate names its
+# A version beside each path, because a packaged crate names its
 # dependencies by version: the same as [workspace.package]'s, or nothing here
 # builds.
 plotcore-sys = { path = "plotcore-sys", version = "0.1.0" }

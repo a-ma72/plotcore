@@ -26,7 +26,7 @@ const SOURCES: &[&str] = &[
 fn main() {
     let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("cargo sets it"));
     // The sources are this crate's cpp/ and c/: links to the repository's own,
-    // which cargo follows when it packages the crate, so the published crate
+    // which cargo follows when it packages the crate, so a packaged crate
     // carries copies and needs no repository around it. A checkout made without
     // symbolic links -- Git for Windows' default -- has each link as a text
     // file naming its target, and is reached from rust/plotcore-sys instead.

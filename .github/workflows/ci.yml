@@ -179,7 +179,7 @@ jobs:
   # to that tag -- then installed on a plain runner and tested, PyQt6 and
   # matplotlib included, against the golden digest the C test wrote. Uploaded
   # as an artefact, which is what both of the PyQt6 demo's packages carry and
-  # what release.yml publishes to PyPI.
+  # what a release (release.yml) offers for download.
   python:
     name: Python (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -276,10 +276,12 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked
 
-      # The three libraries as crates.io receives them -- plotcore-sys
+      # The three libraries as crates.io would receive them -- plotcore-sys
       # carrying the core and the C interface through its links into cpp/ and
       # c/ -- each then built from its package alone, against the others'
-      # packages. What release.yml publishes, from Linux, so checked here.
+      # packages. Nothing is published there; this keeps them publishable,
+      # which a crate reaching out of its own directory was not. Once, on
+      # Linux, because a package is the same from either.
       - name: Package the crates
         if: runner.os == 'Linux'
         run: cargo package --workspace --exclude egui-demo --locked
