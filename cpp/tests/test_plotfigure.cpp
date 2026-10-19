@@ -1514,3 +1514,32 @@ TEST_CASE("the scene says what each axis was numbered and ruled at, as well as w
     REQUIRE(none.sideAxes.size() == 2);
     REQUIRE(none.yAxis.grid.empty());
 }
+
+TEST_CASE("a line on paper is drawn solid, however many there are and whichever is highlighted",
+          "[figure][picture]")
+{
+    // On screen a bundle separates by piling up, and a highlight dims the
+    // rest; on a page a line drawn at part strength is a line somebody will
+    // complain about. The viewer's picture drew every line solid on paper,
+    // and this is that rule asked of a figure set for paper and of a picture.
+    Figure figure = figureOf({ramp(50, 0.0, 1.0), ramp(50, 5.0, 1.0), ramp(50, 10.0, 1.0)});
+    FigureSettings settings = figure.settings();
+    settings.bundle = true;
+    settings.highlighted = 1;
+    figure.setSettings(settings);
+    const Scene screen = figure.scene();
+    REQUIRE(drawnOf(screen, 0).colour.alpha < 1.0);
+    REQUIRE(drawnOf(screen, 1).colour.alpha == 1.0);
+
+    SceneRequest request;
+    request.picture = true;
+    request.width = 400.0;
+    request.height = 300.0;
+    request.paper = true;
+    const Scene page = figure.scene(request);
+    for (int line = 0; line < 3; ++line) {
+        REQUIRE(drawnOf(page, line).colour.alpha == 1.0);
+    }
+    // ...and the pane on screen is left as it was.
+    REQUIRE(drawnOf(figure.scene(), 0).colour.alpha == drawnOf(screen, 0).colour.alpha);
+}

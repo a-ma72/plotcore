@@ -845,8 +845,14 @@ Scene Figure::compose(const SceneRequest& request)
         const Rgba colour = seriesColor(settings_.colours, series, k, count, settings_.paper,
                                         settings_.dark, lineSettings(index).colour);
         line.colour = colour;
-        line.opacity = seriesOpacity(series, count, settings_.highlighted, settings_.bundle,
-                                     settings_.dark && !settings_.paper);
+        // A line on paper is drawn solid, whatever is highlighted and however
+        // many there are -- PlotPicture's one deliberate departure from the
+        // light theme it otherwise draws in. On screen a bundle separates by
+        // piling up; on a page a line drawn at part strength is a line
+        // somebody will complain about (Theme.paperSeriesOpacity).
+        line.opacity = settings_.paper ? 1.0
+                                       : seriesOpacity(series, count, settings_.highlighted,
+                                                       settings_.bundle, settings_.dark);
         line.width = seriesWidth(series, settings_.highlighted, s.lineWidth);
         const LineWindow window = windowOf(k);
         if (window.own) {
