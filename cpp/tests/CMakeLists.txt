@@ -44,6 +44,14 @@ add_executable(test_plotfigure test_plotfigure.cpp)
 target_link_libraries(test_plotfigure PRIVATE plotcore::core Catch2::Catch2WithMain)
 catch_discover_tests(test_plotfigure)
 
+# --- the axes, as the viewer held them -------------------------------------
+# Which ticks over which window, how many figures a label carries, when a power
+# is cut up and what a base is: the rules the viewer's suite asked of its QML
+# frame, asked of the arithmetic that is the frame now.
+add_executable(test_plotaxes test_plotaxes.cpp)
+target_link_libraries(test_plotaxes PRIVATE plotcore::core Catch2::Catch2WithMain)
+catch_discover_tests(test_plotaxes)
+
 # The viewer's answers, asked again: every question its parity suite asked of
 # the QML and of these ports while there were two of them (viewer/README.md).
 # Json.hpp is private to the library, and this is the one test that reads it.

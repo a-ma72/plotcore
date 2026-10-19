@@ -101,6 +101,18 @@ struct LineColours
 struct Chrome
 {
     Rgba ground;
+    /// The ink on the plot: the exact inverse of the ground under it
+    /// (Theme.plotInk).
+    ///
+    /// Everywhere else in the viewer a label is a secondary text colour, and
+    /// that is right -- a form is mostly chrome, and chrome that reads as
+    /// loudly as the value beside it competes with the value. A plot is not
+    /// that. Its ground is the one surface at pure black or pure white, and
+    /// everything written on it -- the numbers on the ticks, the names of the
+    /// axes, the title -- is a *reading* rather than a label for one. So it is
+    /// set at the full step, the opposite end of the neutral ramp: 21:1, the
+    /// most the design can spend, on the one picture a reader takes away and
+    /// looks at somewhere else.
     Rgba ink;
     Rgba ruleMinor;
     Rgba ruleMajor;
@@ -115,11 +127,25 @@ struct Chrome
     /// The ground under a legend and under the band's numbers, through which
     /// a reader can see that a stroke runs on. Theme.plotLegendGround, and
     /// clear on paper, where the page is the ground.
+    ///
+    /// Opaque would be simpler and is wrong: a legend in a corner covers part
+    /// of the pane, and a reader has to be able to see that a stroke runs
+    /// under it rather than stopping there. The band's numbers stand on the
+    /// same veil on purpose (Theme.plotReadoutGround): what both hold up is a
+    /// line of type on the picture, over a stroke as often as over the ground,
+    /// and two veils at two weights would read as two different kinds of thing
+    /// being said about one plot.
     Rgba veil;
     /// The legend's edge. Theme.border.
     Rgba legendEdge;
     /// The band a right drag draws, and its edge. Theme.plotBandFill and
     /// Theme.accent.
+    ///
+    /// An alpha rather than a mix: what is underneath a band is the picture
+    /// itself -- the ground, the grid and however many strokes -- so there is
+    /// no one colour to mix against. What matters is that the curve stays
+    /// legible through it, because the band is drawn *while* the reader is
+    /// deciding where to stop.
     Rgba bandFill;
     Rgba bandEdge;
 };

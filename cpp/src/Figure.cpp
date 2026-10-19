@@ -845,8 +845,14 @@ Scene Figure::compose(const SceneRequest& request)
         const Rgba colour = seriesColor(settings_.colours, series, k, count, settings_.paper,
                                         settings_.dark, lineSettings(index).colour);
         line.colour = colour;
-        line.opacity = seriesOpacity(series, count, settings_.highlighted, settings_.bundle,
-                                     settings_.dark && !settings_.paper);
+        // A line on paper is drawn solid, whatever is highlighted and however
+        // many there are -- PlotPicture's one deliberate departure from the
+        // light theme it otherwise draws in. On screen a bundle separates by
+        // piling up; on a page a line drawn at part strength is a line
+        // somebody will complain about (Theme.paperSeriesOpacity).
+        line.opacity = settings_.paper ? 1.0
+                                       : seriesOpacity(series, count, settings_.highlighted,
+                                                       settings_.bundle, settings_.dark);
         line.width = seriesWidth(series, settings_.highlighted, s.lineWidth);
         const LineWindow window = windowOf(k);
         if (window.own) {
@@ -995,14 +1001,28 @@ Scene Figure::compose(const SceneRequest& request)
         }
         return filled(a.x, upY(fraction), a.width, hairline, colour, Mark::Layer::Grid);
     };
-    for (const Rule& found : gridAt(settings_.grid, xGrid, lay.xTicks.values, cx.viewLow(),
-                                    cx.viewHigh(), cx.logarithmic, cx.base)) {
+    // What each common axis is numbered and ruled at, kept on the scene in
+    // its own values as well as painted (SceneAxis).
+    const auto commonAxis = [](const CameraAxis& axis, const TickSet& ticks) {
+        SceneAxis out;
+        out.window = {axis.viewLow(), axis.viewHigh()};
+        out.logarithmic = axis.logarithmic;
+        out.base = axis.base;
+        out.ticks = ticks;
+        return out;
+    };
+    scene.xAxis = commonAxis(cx, lay.xTicks);
+    scene.yAxis = commonAxis(cy, lay.yTicks);
+    scene.xAxis.grid = gridAt(settings_.grid, xGrid, lay.xTicks.values, cx.viewLow(), cx.viewHigh(),
+                              cx.logarithmic, cx.base);
+    scene.yAxis.grid = gridAt(settings_.grid, yGrid, lay.yTicks.values, cy.viewLow(), cy.viewHigh(),
+                              cy.logarithmic, cy.base);
+    for (const Rule& found : scene.xAxis.grid) {
         if (found.at >= 0.0 && found.at <= 1.0) {
             scene.under.push_back(rule(found.at, true, found.major));
         }
     }
-    for (const Rule& found : gridAt(settings_.grid, yGrid, lay.yTicks.values, cy.viewLow(),
-                                    cy.viewHigh(), cy.logarithmic, cy.base)) {
+    for (const Rule& found : scene.yAxis.grid) {
         if (found.at >= 0.0 && found.at <= 1.0) {
             scene.under.push_back(rule(found.at, false, found.major));
         }
@@ -1085,20 +1105,24 @@ Scene Figure::compose(const SceneRequest& request)
                               axis.viewHigh(), axis.base, extent,
                               up ? std::ceil(lay.minorHeight) : s.gapS, up ? 0.0 : minorWidth);
     };
-    const std::vector<double>& leftGrid = settings_.flipped ? xGrid : yGrid;
-    const std::vector<double>& footGrid = settings_.flipped ? yGrid : xGrid;
-    const TickSet& leftSet = settings_.flipped ? lay.xTicks : lay.yTicks;
-    const TickSet& footSet = settings_.flipped ? lay.yTicks : lay.xTicks;
-    const CameraAxis& leftAxis = settings_.flipped ? cx : cy;
-    const CameraAxis& footAxis = settings_.flipped ? cy : cx;
+    // By axis rather than by side, so that the scene can say which are x's:
+    // the axis numbered up the left is y's, or x's when the plot is flipped.
+    scene.xAxis.minor =
+        minors(xGrid, lay.xTicks, cx, settings_.flipped, settings_.flipped ? a.height : a.width);
+    scene.yAxis.minor =
+        minors(yGrid, lay.yTicks, cy, !settings_.flipped, settings_.flipped ? a.width : a.height);
+    const std::vector<MinorNumber>& leftMinor =
+        settings_.flipped ? scene.xAxis.minor : scene.yAxis.minor;
+    const std::vector<MinorNumber>& footMinor =
+        settings_.flipped ? scene.yAxis.minor : scene.xAxis.minor;
     if (settings_.flipped || lay.common) {
-        for (const MinorNumber& number : minors(leftGrid, leftSet, leftAxis, true, a.height)) {
+        for (const MinorNumber& number : leftMinor) {
             addText(TickLabel{number.text, "", number.text}, Point(a.x - s.gapS, upY(number.at)),
                     TextItem::Align::End, TextItem::Align::Middle, TextRole::TickMinor, chrome.ink);
         }
     }
     if (footNumbered) {
-        for (const MinorNumber& number : minors(footGrid, footSet, footAxis, false, a.width)) {
+        for (const MinorNumber& number : footMinor) {
             addText(TickLabel{number.text, "", number.text},
                     Point(alongX(number.at), bottom + s.s3), TextItem::Align::Middle,
                     TextItem::Align::Start, TextRole::TickMinor, chrome.ink);
@@ -1141,6 +1165,18 @@ Scene Figure::compose(const SceneRequest& request)
     // nobody can name.
     for (const Layout::Side& side : lay.sides) {
         const double base = cy.base;
+        SceneAxis own;
+        own.line = side.line;
+        own.window = {side.window.low, side.window.high};
+        own.logarithmic = side.window.logarithmic;
+        own.base = base;
+        own.ticks = side.ticks;
+        own.colour = side.colour;
+        own.label = side.label;
+        own.box = settings_.flipped
+                      ? PaneRect{a.x, bottom + lay.footHeight + side.at, a.width, side.extent}
+                      : PaneRect{side.at, a.y, side.extent, a.height};
+        scene.sideAxes.push_back(std::move(own));
         if (!settings_.flipped) {
             // A column: its name, its numbers, a gap, a tick and a rule, right
             // to left from the rule.

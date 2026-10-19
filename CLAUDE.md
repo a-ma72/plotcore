@@ -88,7 +88,7 @@ each define their own targets.
 | Path | What it is |
 |---|---|
 | `cpp/include/plotcore/`, `cpp/src/` | `plotcore::core`. The arithmetic: `Projection` (where a sample lands, gaps, the thinning, strokes as triangles), `Levels` (the fold and the policy over held runs), `Pyramid` (what every run is folded out of), `Budget` (what may be held), `Parallel` (the pool a large fold is spread over). The frame: `Format`, `Ticks`, `Camera`, `Palettes`. Then `LineSource` (what a figure asks of its lines), `Plot` (lines held, and one such source) and `Figure` (the whole plot a host drives). `cpp/src/Json.*` is private. |
-| `cpp/tests/` | The Catch2 suites: `test_plotprojection`, `test_plotlevels`, `test_plotfigure`, and `test_plotviewer`, which asks again every question H5Scope's parity suite asked and holds the answers to the ones recorded in `viewer/answers.jsonl`. |
+| `cpp/tests/` | The Catch2 suites: `test_plotprojection`, `test_plotlevels`, `test_plotfigure`, `test_plotaxes` (the rules the viewer's suite held its QML axes to), and `test_plotviewer`, which asks again every question H5Scope's parity suite asked and holds the answers to the ones recorded in `viewer/answers.jsonl`. |
 | `cpp/qt/`, `cpp/qt-demo/` | `plotcore::qt`, a `QWidget` over a `Figure`, and the Qt demo. |
 | `c/` | `plotcore.h`, `Figure` as C, built as `plotcore_c`, and `tests/test_capi.c`. |
 | `python/` | The package (`src/plotcore`: `_native.py`, `figure.py`, `scene.py`, `qt.py`, `mpl.py`), its tests, and `pyqt6-demo/` with the demo's pinned `requirements.txt`. |
@@ -106,20 +106,22 @@ consequences:
 - **A change here reaches the viewer when the viewer moves its pin.** That is
   an H5Scope pull request of its own (`git -C plotcore checkout <sha>`, commit
   the pointer), and it is where H5Scope's suite — `test_cost`,
-  `test_customplot`, the parity suite — runs against the change. A change that
+  `test_customplot`, and the QML suite that drives the plot as a reader does —
+  runs against the change. A change that
   needs the viewer to change with it lands here first, then in H5Scope with
   the pin.
-- **`Format`, `Ticks`, `Camera` and `Palettes` are ports**, of H5Scope's
-  `PlotFrame.qml`, `PlotSurface.qml` and `Theme.qml`, and H5Scope's
-  `tests/qml/tst_plotcore_parity.qml` asks both the same questions and compares
-  the answers exactly — values bit for bit, labels character for character,
-  colours to a sixteen-bit step, JavaScript's own number formatting included.
-  **A change to how an axis is numbered, ruled, zoomed or coloured is a change
-  to both, or the parity suite fails when the pin moves.** The argument for
-  each rule is written over its function in `Camera.cpp`, `Ticks.cpp` and
-  `Palettes.cpp`, carried there from the QML in the viewer's own words. Every
-  question that suite asks is also recorded here with its answer
-  (`cpp/tests/viewer/`), so the rules stay held once the QML is gone.
+- **The viewer's plot is `Figure`.** H5Scope hosts it in `gui::FigureItem`,
+  a `LineSource` over the lines it reads from a file on a thread, and keeps no
+  plot of its own: **a change to how the plot is numbered, ruled, zoomed,
+  coloured or drawn is a change to the viewer's picture**, and its QML suite
+  asserts that picture when the pin moves. `Format`, `Ticks`, `Camera` and
+  `Palettes` began as ports of its `PlotFrame.qml`, `PlotSurface.qml` and
+  `Theme.qml`, held to them by a parity suite for as long as both existed.
+  The QML is gone; every answer that suite was given is recorded here
+  (`cpp/tests/viewer/`, `test_plotviewer`), the rules the viewer's suite held
+  its axes to are `test_plotaxes`, and the argument for each rule is written
+  over its function in `Camera.cpp`, `Ticks.cpp` and `Palettes.cpp`, in the
+  viewer's own words.
 - **The rules of the plot itself are written in H5Scope's CLAUDE.md** — the
   separate axes, the logarithmic axis and its edges, why a log x is folded per
   column, why an extreme is drawn at its element, what a zoom may read — and
@@ -168,8 +170,11 @@ answered:
   forms of a line a host draws (`SceneOptions`), and whether it is a
   **picture** — the pane laid out again at another size, in the page's colours,
   with a crosshair pinned to a sample — which asks the lines for nothing and
-  leaves the pane as it was. Every frame shares `kMaxVertices` between its
-  lines (`maxColumnsFor`). `state()`/`restore()` write a view as JSON
+  leaves the pane as it was. Beside the marks, a scene says what each axis
+  was numbered and ruled at in its own values (`SceneAxis`): for a host that
+  draws its own frame, and for a test that asks which values rather than which
+  rounded pixels. Every frame shares `kMaxVertices` between its lines
+  (`maxColumnsFor`). `state()`/`restore()` write a view as JSON
   (`cpp/src/Json.*`), passing over what they cannot read as the viewer's saved
   views do.
 - **`c/plotcore.h`** is `Figure` as C, built as one shared library

@@ -97,22 +97,50 @@ struct FigureStyle
     double gapL = 12.0;
     double s3 = 4.0;
     double s9 = 24.0;
+    /// The inset where the axis labels live, on the side of a y label: a
+    /// number of several digits written sideways-on to the axis, where an x
+    /// label is a column index under it (Theme.plotLabelMargin).
     double labelMargin = 32.0;
     /// Theme.borderWidthAccent, and the hairline every rule is drawn at.
     double accentWidth = 2.0;
     double ruleWidth = 1.0;
     double tickLength = 4.0;
+    /// How far an exponent on a logarithmic axis sits above the line of the
+    /// number it raises: the `3` of `10³` (Theme.plotExponentRaise).
+    ///
+    /// matplotlib's mathtext puts a superscript's baseline at a little under
+    /// half the height of the type it raises. The tick face is ten pixels,
+    /// and four is that on the spacing ladder -- enough that the exponent
+    /// reads as raised rather than as a smaller digit beside the power, and
+    /// not so much that it leaves the line of type the gutter was measured
+    /// for.
     double exponentRaise = 4.0;
+    /// A line is a hairline like every other stroke in the viewer's design;
+    /// the marker is the smallest dot that still reads as one
+    /// (Theme.plotLineWidth, plotMarkerSize).
     double lineWidth = 1.0;
     double markerSize = 4.0;
     /// Theme.radiusS: the corners of a veil.
     double radius = 2.0;
     /// How much of the pane a pointer covers, down and to the right of its
     /// hotspot (Theme.pointerSize): what the band's numbers stay off.
+    ///
+    /// Not a measurement a host can make: the cursor belongs to the window
+    /// system and its size is the reader's own setting. This is the common
+    /// one -- a 24-pixel arrow whose hotspot is its tip -- and it exists so
+    /// that a readout which follows the pointer can be drawn beside it rather
+    /// than underneath it. Wrong by a few pixels on a reader who has scaled
+    /// their cursor up; wrong by the whole of it if nothing tries.
     double pointerSize = 24.0;
-    /// The legend's swatch, and how many rows it names before it counts the
-    /// rest (Theme.plotLegendSwatch, plotLegendRows).
+    /// The legend's swatch: a stroke of line, not a block of colour, because
+    /// what it stands for is a stroke (Theme.plotLegendSwatch).
     double legendSwatch = 12.0;
+    /// How many lines the legend on the plot names before it stops and says
+    /// how many are left (Theme.plotLegendRows). A plot of ten thousand lines
+    /// has a legend ten thousand rows tall, which is not a legend -- it is the
+    /// picture replaced by a list of what is in it. Twelve is about a third of
+    /// a pane at the viewer's row height, which is as much of the drawing as
+    /// a caption may take.
     int legendRows = 12;
     /// How far the pointer travels, across or down, before a press becomes a
     /// drag: QStyleHints::startDragDistance, which a host sets from its
@@ -121,6 +149,11 @@ struct FigureStyle
     /// waits for the platform's threshold before it is a band at all.
     double dragDistance = 10.0;
     int tickTarget = 8;
+    /// How much finer the dense grid is than the numbered ticks
+    /// (Theme.plotGridDenseFactor). Four, which after niceStep's rounding to
+    /// 1, 2 or 5 is usually five minor rules between two labels and sometimes
+    /// two. It is the one quantity that decides what "dense" means, and both
+    /// axes read it.
     int denseFactor = 4;
 
     /// A measure that needs no font: three fifths of the face's size a
@@ -372,6 +405,37 @@ struct Reading
     std::string yText;
 };
 
+/// One axis as it was numbered and ruled, in its own values.
+///
+/// The marks say where the numbers and the rules were painted, in whole
+/// pixels; this says what they were. A host that draws its frame in its own
+/// toolkit takes the numbers from here rather than reading them back off the
+/// marks, and so does a test that asks which values an axis was ruled at
+/// rather than which pixels: a rule rounded to a pixel is a value known to
+/// within half of one, and the viewer's suite held its axes to the exact
+/// fraction for as long as the frame was QML it could ask.
+struct SceneAxis
+{
+    /// The line this is the axis of, or -1 for a common one.
+    int line = -1;
+    /// What it runs between, and on which scale.
+    Span window;
+    bool logarithmic = false;
+    double base = 10.0;
+    /// Its numbers: the values, the label written at each, and the ticks.
+    TickSet ticks;
+    /// The rules across the pane from it, each at a fraction of the axis.
+    std::vector<Rule> grid;
+    /// The digits between two of its numbers, where they are asked for.
+    std::vector<MinorNumber> minor;
+    /// For an axis of a line's own: the colour it is drawn in, which is its
+    /// line's; its name; and where it stands, in pane pixels -- a column left
+    /// of the pane, or a row under it when the plot is flipped.
+    Rgba colour;
+    std::string label;
+    PaneRect box;
+};
+
 /// One frame.
 struct Scene
 {
@@ -404,6 +468,13 @@ struct Scene
     std::string messageTitle;
     Span x;
     Span y;
+    /// The common axes as they were numbered and ruled -- y's without numbers
+    /// or rules when no line is drawn against it -- and each axis of a line's
+    /// own, in the order they stand beside the pane. Not carried across the C
+    /// interface yet: its hosts paint the marks.
+    SceneAxis xAxis;
+    SceneAxis yAxis;
+    std::vector<SceneAxis> sideAxes;
 
     /// The texts painted over the lines, in order: what a test reads the
     /// numbers off.
