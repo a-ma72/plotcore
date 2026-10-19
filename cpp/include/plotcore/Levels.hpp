@@ -193,11 +193,12 @@ struct HeldLevel
 
     /// Whether this run holds everything its owner would need to draw from it.
     ///
-    /// The one question the two models answer differently, which is why they
-    /// answer it rather than this file. DatasetPlot holds one run for the whole
-    /// drawn set, so a run read before a line was ticked back on is a run it
-    /// cannot draw; CustomPlot holds a run per entry, where the only question is
-    /// whether it came back at all.
+    /// A question about the lines rather than the window, which is why it is
+    /// answered outside this file -- by RunLadder, for every host. The viewer's
+    /// two plots once answered it differently: DatasetPlot holds one run for
+    /// the whole drawn set, so a run read before a line was ticked back on is a
+    /// run it cannot draw; CustomPlot holds a run per entry, where the only
+    /// question is whether it came back at all. The ladder asks both.
     bool complete = false;
 };
 

@@ -17,6 +17,7 @@ add_library(plotcore_core
   src/Plot.cpp
   src/Projection.cpp
   src/Pyramid.cpp
+  src/RunLadder.cpp
   src/Ticks.cpp
 )
 add_library(plotcore::core ALIAS plotcore_core)

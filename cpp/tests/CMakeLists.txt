@@ -36,6 +36,13 @@ add_executable(test_plotlevels test_plotlevels.cpp)
 target_link_libraries(test_plotlevels PRIVATE plotcore::core Catch2::Catch2WithMain)
 catch_discover_tests(test_plotlevels)
 
+# --- the runs a line is held at, read through a host -----------------------
+# RunLadder, with the test as the host: it lends the pyramids, answers each
+# read it is told to out of the elements, and counts what is given up.
+add_executable(test_plotruns test_plotruns.cpp)
+target_link_libraries(test_plotruns PRIVATE plotcore::core Catch2::Catch2WithMain)
+catch_discover_tests(test_plotruns)
+
 # --- the whole plot, as a host drives it ----------------------------------
 # The store, the frame and the gestures, through the same calls a Qt, Python
 # or Rust host makes and checked in the pixels and the elements they hand
