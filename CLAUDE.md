@@ -88,7 +88,7 @@ each define their own targets.
 | Path | What it is |
 |---|---|
 | `cpp/include/plotcore/`, `cpp/src/` | `plotcore::core`. The arithmetic: `Projection` (where a sample lands, gaps, the thinning, strokes as triangles), `Levels` (the fold and the policy over held runs), `Pyramid` (what every run is folded out of), `Budget` (what may be held), `Parallel` (the pool a large fold is spread over). The frame: `Format`, `Ticks`, `Camera`, `Palettes`. Then `LineSource` (what a figure asks of its lines), `Plot` (lines held, and one such source) and `Figure` (the whole plot a host drives). `cpp/src/Json.*` is private. |
-| `cpp/tests/` | The Catch2 suites: `test_plotprojection`, `test_plotlevels`, `test_plotfigure`, and `test_plotviewer`, which asks again every question H5Scope's parity suite asked and holds the answers to the ones recorded in `viewer/answers.jsonl`. |
+| `cpp/tests/` | The Catch2 suites: `test_plotprojection`, `test_plotlevels`, `test_plotfigure`, `test_plotaxes` (the rules the viewer's suite held its QML axes to), and `test_plotviewer`, which asks again every question H5Scope's parity suite asked and holds the answers to the ones recorded in `viewer/answers.jsonl`. |
 | `cpp/qt/`, `cpp/qt-demo/` | `plotcore::qt`, a `QWidget` over a `Figure`, and the Qt demo. |
 | `c/` | `plotcore.h`, `Figure` as C, built as `plotcore_c`, and `tests/test_capi.c`. |
 | `python/` | The package (`src/plotcore`: `_native.py`, `figure.py`, `scene.py`, `qt.py`, `mpl.py`), its tests, and `pyqt6-demo/` with the demo's pinned `requirements.txt`. |
@@ -168,8 +168,11 @@ answered:
   forms of a line a host draws (`SceneOptions`), and whether it is a
   **picture** — the pane laid out again at another size, in the page's colours,
   with a crosshair pinned to a sample — which asks the lines for nothing and
-  leaves the pane as it was. Every frame shares `kMaxVertices` between its
-  lines (`maxColumnsFor`). `state()`/`restore()` write a view as JSON
+  leaves the pane as it was. Beside the marks, a scene says what each axis
+  was numbered and ruled at in its own values (`SceneAxis`): for a host that
+  draws its own frame, and for a test that asks which values rather than which
+  rounded pixels. Every frame shares `kMaxVertices` between its lines
+  (`maxColumnsFor`). `state()`/`restore()` write a view as JSON
   (`cpp/src/Json.*`), passing over what they cannot read as the viewer's saved
   views do.
 - **`c/plotcore.h`** is `Figure` as C, built as one shared library

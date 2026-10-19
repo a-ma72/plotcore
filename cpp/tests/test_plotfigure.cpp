@@ -1418,3 +1418,99 @@ TEST_CASE("a band begins where the platform says a drag does", "[figure][band]")
     figure.release(at.x() + 2.0, at.y() + 2.0, Button::Right, {});
     REQUIRE_FALSE(figure.scene().band.has_value());
 }
+
+TEST_CASE("the scene says what each axis was numbered and ruled at, as well as where",
+          "[figure][axes]")
+{
+    // Six decades, 10^(i/8 - 3), with a zero and a negative the scale has no
+    // place for: the viewer's /series/decades.
+    std::vector<double> decades(49);
+    for (std::size_t i = 0; i < decades.size(); ++i) {
+        decades[i] = std::pow(10.0, static_cast<double>(i) / 8.0 - 3.0);
+    }
+    decades[10] = 0.0;
+    decades[20] = -std::pow(10.0, -0.5);
+    Figure figure = figureOf({decades});
+    FigureSettings settings = figure.settings();
+    settings.yLog = true;
+    settings.grid = GridMode::Dense;
+    settings.minorNumbers = true;
+    figure.setSettings(settings);
+    const Scene scene = figure.scene();
+
+    // The numbers as the axis wrote them, at the values it wrote them at.
+    const SceneAxis& y = scene.yAxis;
+    REQUIRE(y.line == -1);
+    REQUIRE(y.logarithmic);
+    REQUIRE(y.window.low == scene.y.low);
+    REQUIRE(y.window.high == scene.y.high);
+    REQUIRE(y.ticks.logarithmic);
+    REQUIRE(y.ticks.values.size() == 7);
+    REQUIRE(y.ticks.texts.front().text == "10\xE2\x81\xBB\xC2\xB3");
+    // ...and each is the text painted beside the pane, at the place its value
+    // falls, to the pixel the frame rounds it to.
+    std::vector<TextItem> left;
+    for (const TextItem& text : scene.texts()) {
+        if (text.role == TextRole::Tick && text.across == TextItem::Align::End) {
+            left.push_back(text);
+        }
+    }
+    REQUIRE(left.size() == y.ticks.values.size());
+    for (std::size_t i = 0; i < left.size(); ++i) {
+        REQUIRE(left[i].text == y.ticks.texts[i].text);
+        const double f = fractionOn(y.ticks.values[i], y.window.low, y.window.high, true, y.base);
+        REQUIRE(std::abs(left[i].at.y() - (scene.area.y + (1.0 - f) * scene.area.height)) <= 0.5);
+    }
+
+    // The rules: every one in the pane is a hairline under the lines, and the
+    // majors are where the numbers are.
+    std::size_t inside = 0;
+    for (const SceneAxis* axis : {&scene.xAxis, &scene.yAxis}) {
+        for (const Rule& rule : axis->grid) {
+            inside += rule.at >= 0.0 && rule.at <= 1.0 ? 1 : 0;
+        }
+    }
+    std::size_t ruled = 0;
+    for (const Mark& mark : scene.under) {
+        ruled += mark.layer == Mark::Layer::Grid ? 1 : 0;
+    }
+    REQUIRE(ruled == inside);
+    std::size_t majors = 0;
+    for (const Rule& rule : y.grid) {
+        majors += rule.major ? 1 : 0;
+    }
+    REQUIRE(majors == y.ticks.values.size());
+
+    // The digits between them sit on minor rules, and are the ones painted.
+    REQUIRE_FALSE(y.minor.empty());
+    std::size_t digits = 0;
+    for (const TextItem& text : scene.texts()) {
+        digits += text.role == TextRole::TickMinor && text.text.size() == 1 ? 1 : 0;
+    }
+    REQUIRE(digits == y.minor.size() + scene.xAxis.minor.size());
+    for (const MinorNumber& digit : y.minor) {
+        bool onMinor = false;
+        for (const Rule& rule : y.grid) {
+            onMinor = onMinor || (!rule.major && std::abs(rule.at - digit.at) < 1e-9);
+        }
+        REQUIRE(onMinor);
+    }
+    REQUIRE(scene.sideAxes.empty());
+
+    // A line on an axis of its own has its axis listed, with its numbers in
+    // its own units; with every line on one, the common y rules nothing.
+    Figure two = figureOf({ramp(100, 0.0, 1.0), ramp(100, 1e6, 1e3)});
+    LineSettings own;
+    own.ownAxis = true;
+    two.setLineSettings(1, own);
+    const Scene apart = two.scene();
+    REQUIRE(apart.sideAxes.size() == 1);
+    REQUIRE(apart.sideAxes.front().line == 1);
+    REQUIRE(apart.sideAxes.front().window.low > 1e5);
+    REQUIRE_FALSE(apart.sideAxes.front().ticks.values.empty());
+    REQUIRE_FALSE(apart.yAxis.grid.empty());
+    two.setLineSettings(0, own);
+    const Scene none = two.scene();
+    REQUIRE(none.sideAxes.size() == 2);
+    REQUIRE(none.yAxis.grid.empty());
+}

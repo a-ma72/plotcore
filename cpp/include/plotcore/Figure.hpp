@@ -372,6 +372,31 @@ struct Reading
     std::string yText;
 };
 
+/// One axis as it was numbered and ruled, in its own values.
+///
+/// The marks say where the numbers and the rules were painted, in whole
+/// pixels; this says what they were. A host that draws its frame in its own
+/// toolkit takes the numbers from here rather than reading them back off the
+/// marks, and so does a test that asks which values an axis was ruled at
+/// rather than which pixels: a rule rounded to a pixel is a value known to
+/// within half of one, and the viewer's suite held its axes to the exact
+/// fraction for as long as the frame was QML it could ask.
+struct SceneAxis
+{
+    /// The line this is the axis of, or -1 for a common one.
+    int line = -1;
+    /// What it runs between, and on which scale.
+    Span window;
+    bool logarithmic = false;
+    double base = 10.0;
+    /// Its numbers: the values, the label written at each, and the ticks.
+    TickSet ticks;
+    /// The rules across the pane from it, each at a fraction of the axis.
+    std::vector<Rule> grid;
+    /// The digits between two of its numbers, where they are asked for.
+    std::vector<MinorNumber> minor;
+};
+
 /// One frame.
 struct Scene
 {
@@ -404,6 +429,13 @@ struct Scene
     std::string messageTitle;
     Span x;
     Span y;
+    /// The common axes as they were numbered and ruled -- y's without numbers
+    /// or rules when no line is drawn against it -- and each axis of a line's
+    /// own, in the order they stand beside the pane. Not carried across the C
+    /// interface yet: its hosts paint the marks.
+    SceneAxis xAxis;
+    SceneAxis yAxis;
+    std::vector<SceneAxis> sideAxes;
 
     /// The texts painted over the lines, in order: what a test reads the
     /// numbers off.
