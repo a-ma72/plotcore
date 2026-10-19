@@ -87,8 +87,8 @@ each define their own targets.
 
 | Path | What it is |
 |---|---|
-| `cpp/include/plotcore/`, `cpp/src/` | `plotcore::core`. The arithmetic: `Projection` (where a sample lands, gaps, the thinning, strokes as triangles), `Levels` (the fold and the policy over held runs), `Pyramid` (what every run is folded out of), `Budget` (what may be held), `Parallel` (the pool a large fold is spread over). The frame: `Format`, `Ticks`, `Camera`, `Palettes`. Then `LineSource` (what a figure asks of its lines), `Plot` (lines held, and one such source) and `Figure` (the whole plot a host drives). `cpp/src/Json.*` is private. |
-| `cpp/tests/` | The Catch2 suites: `test_plotprojection`, `test_plotlevels`, `test_plotfigure`, `test_plotaxes` (the rules the viewer's suite held its QML axes to), and `test_plotviewer`, which asks again every question H5Scope's parity suite asked and holds the answers to the ones recorded in `viewer/answers.jsonl`. |
+| `cpp/include/plotcore/`, `cpp/src/` | `plotcore::core`. The arithmetic: `Projection` (where a sample lands, gaps, the thinning, strokes as triangles), `Levels` (the fold and the policy over held runs), `RunLadder` (the runs a host that reads on a thread holds under that policy, and the read it is to make next), `Pyramid` (what every run is folded out of), `Budget` (what may be held), `Parallel` (the pool a large fold is spread over). The frame: `Format`, `Ticks`, `Camera`, `Palettes`. Then `LineSource` (what a figure asks of its lines), `Plot` (lines held, and one such source) and `Figure` (the whole plot a host drives). `cpp/src/Json.*` is private. |
+| `cpp/tests/` | The Catch2 suites: `test_plotprojection`, `test_plotlevels`, `test_plotruns`, `test_plotfigure`, `test_plotaxes` (the rules the viewer's suite held its QML axes to), and `test_plotviewer`, which asks again every question H5Scope's parity suite asked and holds the answers to the ones recorded in `viewer/answers.jsonl`. |
 | `cpp/qt/`, `cpp/qt-demo/` | `plotcore::qt`, a `QWidget` over a `Figure`, and the Qt demo. |
 | `c/` | `plotcore.h`, `Figure` as C, built as `plotcore_c`, and `tests/test_capi.c`. |
 | `python/` | The package (`src/plotcore`: `_native.py`, `figure.py`, `scene.py`, `qt.py`, `mpl.py`), its tests, and `pyqt6-demo/` with the demo's pinned `requirements.txt`. |
@@ -141,7 +141,9 @@ answered:
   the whole-line summary. It is one **`LineSource`**: what a `Figure` asks of
   its lines, and all it asks. A host that holds its lines its own way — the
   viewer, reading a file on a thread under a shared budget — hands the figure
-  a source of its own (`Figure::setSource`); a line then also says which
+  a source of its own (`Figure::setSource`), and holds what it has read below
+  its pyramids in a `RunLadder`, which `Plot` has no need of because its reader
+  answers in the call. A line then also says which
   *series* it is, so a line keeps its colour when the host leaves one before it
   out. A figure asks each line what it spans once a frame, in `refresh()`:
   the viewer's Plot tab is ten thousand lines, and a question asked per line

@@ -12,9 +12,10 @@
 // is a fold of that pyramid -- the whole-line summary at the pane's width, a
 // closer look at the window on screen, and on a logarithmic x axis a fold per
 // pixel column. A fold of a pyramid is a few thousand doubles, so every frame
-// asks for exactly what it draws and nothing is read ahead: the ladder of
-// held runs exists in the viewer to hide reads of a file, and here there are
-// none to hide.
+// asks for exactly what it draws and nothing is read ahead: a ladder of held
+// runs (RunLadder) exists to hide reads of a file on another thread, which is
+// what the viewer has, and here there are none to hide -- a LineReader answers
+// in the call that asks it.
 //
 // A line's x is the index (`start + i * step`), a time base the plot shares,
 // or a time base of the line's own -- each one value per element, held whole.
