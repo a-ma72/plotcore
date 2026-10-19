@@ -284,6 +284,12 @@ Rgba mix(const Rgba& from, const Rgba& to, double amount)
                     from.alpha + (to.alpha - from.alpha) * t);
 }
 
+// A colour `position` of the way along `stops`, interpolated in RGB
+// (Theme.rampColor). A function rather than a table because the number of
+// lines is not known until the plot is drawn: five stops have to serve two
+// lines and five hundred. Linear in RGB rather than in HSV -- HSV walks the
+// long way round the wheel between two stops and invents hues that are in
+// neither.
 Rgba rampColor(const std::vector<Rgba>& stops, double position)
 {
     if (stops.empty()) {
@@ -299,6 +305,17 @@ Rgba rampColor(const std::vector<Rgba>& stops, double position)
     return mix(stops[lower], stops[upper], at - static_cast<double>(lower));
 }
 
+// The colour line `position` takes from the palette `stops`, which repeats
+// (Theme.categoricalColor). rampColor's counterpart, and the difference
+// between them is the whole difference between the two kinds of cycle: a
+// ramp is asked for a place along a continuum and interpolates to reach it, a
+// palette is asked which entry a line *is* and can only hand one back.
+//
+// Repeating rather than running out is what makes two hundred lines drawable
+// at all. The twenty-first line takes the first colour again, and the legend
+// beside it is what tells the two apart -- the bargain every plotting library
+// makes, and a better one than silently drawing the rest in grey. The modulo
+// stays positive because reversing a cycle counts backwards from its end.
 Rgba categoricalColor(const std::vector<Rgba>& stops, double position)
 {
     if (stops.empty()) {
@@ -309,6 +326,22 @@ Rgba categoricalColor(const std::vector<Rgba>& stops, double position)
     return stops[static_cast<std::size_t>(((at % n) + n) % n)];
 }
 
+// One colour a reader's own settings put on a line, as it must be drawn on
+// paper (Theme.paperColor).
+//
+// The cycles have a light-scope table of their own; this is for the three
+// colours that are not a cycle at all -- the "same" colour, the two ends of a
+// "range", and a line the reader gave a colour of its own -- because those
+// are *values* by the time they get here and there is no binding left to
+// re-resolve. So they are mapped by value, and only the two a token can have
+// put there. The first is not a nicety: the accent is signal white on the
+// dark theme, and a white line on paper is not a faint line -- it is no line
+// at all. That substitution is the exact mirror of the one okabe-ito makes in
+// the other direction: a colour that *is* the ground is not a line.
+//
+// What it costs is small: a reader who picks signal white or signal cyan by
+// hand gets paper's version of it rather than the colour they pointed at --
+// the answer the light theme would give them, and legible on a page.
 Rgba paperColor(const Rgba& colour)
 {
     if (sameColour(colour, colourOf(kSig500))) {
@@ -459,6 +492,15 @@ Rgba seriesColor(const LineColours& chosen, int series, int position, int count,
 // alone, when there was no pile-up to show.
 double seriesOpacity(int series, int count, int highlighted, bool bundle, bool onDark)
 {
+    // The two scopes are nowhere near each other, and the arithmetic is why
+    // (Theme.plotSeriesOpacity). A translucent line is its colour mixed with
+    // the ground: toward black that is a dimmer version of the colour, and dim
+    // on black is still a line; toward white it floods the colour with white,
+    // and pale on white is nothing. Measured: the palettes' weakest entry reads
+    // at 3.4:1 through 0.55 on black and at 1.7:1 through 0.55 on white, which
+    // is a line the reader has to hunt for. 0.95 brings the light scope back to
+    // the dark one's 3.4:1 -- so the light theme keeps a little of the piling
+    // up and spends the rest on being legible, the trade a white ground forces.
     const double bundled = onDark ? 0.55 : 0.95;
     if (highlighted >= 0) {
         return series == highlighted ? 1.0 : bundled / 2.0;
@@ -480,6 +522,14 @@ Chrome chromeFor(bool onDark, bool paper)
         // PlotPicture's publication overrides: the light scope, with the
         // legend on the page itself rather than on a veil, ruled at the
         // major rule's step and its count written at the axis's.
+        //
+        // The light scope named *without* the theme's switch in front of it,
+        // and that is the whole of why there is a paper chrome at all. A plot
+        // exported for publication is drawn on paper -- white, or the page's
+        // own colour through a clear ground -- and the reader who asks for it
+        // is usually sitting in the dark theme. None of these is a new colour:
+        // each is the light-scope value of the one it stands in for, which is
+        // what keeps a publication export and the light theme one picture.
         chrome = Chrome{colourOf(kN11),
                         colourOf(kN0),
                         colourOf(kLineLight),
