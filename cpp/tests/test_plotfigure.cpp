@@ -1505,9 +1505,15 @@ TEST_CASE("the scene says what each axis was numbered and ruled at, as well as w
     two.setLineSettings(1, own);
     const Scene apart = two.scene();
     REQUIRE(apart.sideAxes.size() == 1);
-    REQUIRE(apart.sideAxes.front().line == 1);
-    REQUIRE(apart.sideAxes.front().window.low > 1e5);
-    REQUIRE_FALSE(apart.sideAxes.front().ticks.values.empty());
+    const SceneAxis& side = apart.sideAxes.front();
+    REQUIRE(side.line == 1);
+    REQUIRE(side.window.low > 1e5);
+    REQUIRE_FALSE(side.ticks.values.empty());
+    // ...in its line's colour, in a column left of the pane.
+    REQUIRE(side.colour == drawnOf(apart, 1).colour);
+    REQUIRE(side.box.width > 0.0);
+    REQUIRE(side.box.x + side.box.width <= apart.area.x);
+    REQUIRE(side.box.height == apart.area.height);
     REQUIRE_FALSE(apart.yAxis.grid.empty());
     two.setLineSettings(0, own);
     const Scene none = two.scene();

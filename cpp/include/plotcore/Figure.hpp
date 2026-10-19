@@ -395,6 +395,12 @@ struct SceneAxis
     std::vector<Rule> grid;
     /// The digits between two of its numbers, where they are asked for.
     std::vector<MinorNumber> minor;
+    /// For an axis of a line's own: the colour it is drawn in, which is its
+    /// line's; its name; and where it stands, in pane pixels -- a column left
+    /// of the pane, or a row under it when the plot is flipped.
+    Rgba colour;
+    std::string label;
+    PaneRect box;
 };
 
 /// One frame.

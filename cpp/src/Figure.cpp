@@ -1171,6 +1171,11 @@ Scene Figure::compose(const SceneRequest& request)
         own.logarithmic = side.window.logarithmic;
         own.base = base;
         own.ticks = side.ticks;
+        own.colour = side.colour;
+        own.label = side.label;
+        own.box = settings_.flipped
+                      ? PaneRect{a.x, bottom + lay.footHeight + side.at, a.width, side.extent}
+                      : PaneRect{side.at, a.y, side.extent, a.height};
         scene.sideAxes.push_back(std::move(own));
         if (!settings_.flipped) {
             // A column: its name, its numbers, a gap, a tick and a rule, right
