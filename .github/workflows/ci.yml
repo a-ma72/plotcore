@@ -52,7 +52,7 @@ jobs:
           cat > "$RUNNER_TEMP/consumer/CMakeLists.txt" <<'EOF'
           cmake_minimum_required(VERSION 3.26)
           project(consumer CXX)
-          find_package(plotcore 0.1 REQUIRED)
+          find_package(plotcore 0.2 REQUIRED)
           add_executable(consumer main.cpp)
           target_link_libraries(consumer PRIVATE plotcore::core)
           EOF
@@ -98,7 +98,7 @@ jobs:
           cat > "$RUNNER_TEMP/cconsumer/CMakeLists.txt" <<'EOF'
           cmake_minimum_required(VERSION 3.26)
           project(cconsumer C)
-          find_package(plotcore 0.1 REQUIRED)
+          find_package(plotcore 0.2 REQUIRED)
           add_executable(cconsumer main.c)
           target_link_libraries(cconsumer PRIVATE plotcore::c)
           EOF

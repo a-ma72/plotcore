@@ -64,8 +64,10 @@ back.
   `python/src/plotcore/__init__.py`, which nothing checks; `rust/Cargo.lock`,
   which `cargo update -w` rewrites and `--locked` fails on until it has; the
   version the Python and Rust tests assert the library reports
-  (`test_api.py`, `plotcore/src/lib.rs`); and the tag in the `cargo add` line
-  of `README.md` and `rust/README.md`.
+  (`test_api.py`, `plotcore/src/lib.rs`); the `find_package(plotcore 0.x)`
+  of the two install checks in `ci.yml`, which an installed package refuses
+  across a minor (`SameMinorVersion`, because a minor before 1.0 is a break);
+  and the tag in the `cargo add` line of `README.md` and `rust/README.md`.
 - **The notes** are the tag's annotation, from a file so that git's cleanup
   keeps the Markdown headings:
   `git tag -a --cleanup=whitespace -F notes.md v<version>`. A lightweight tag
