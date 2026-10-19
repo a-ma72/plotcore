@@ -10,7 +10,9 @@
 #include <cstdio>
 
 // The values are Theme.qml's, token for token; the functions are Theme's and
-// PlotSurface's of the same names.
+// PlotSurface's of the same names. The argument for each is written over it,
+// in the viewer's words, carried from the QML when the viewer came to draw
+// through Figure.
 
 namespace plotcore {
 namespace {
@@ -116,21 +118,114 @@ const std::vector<std::string>& rampNames()
     return names;
 }
 
+// The categorical palettes for plotted lines (Theme.palettesFor).
+//
+// A ramp answers "how far along is this line". A palette answers "which
+// line is this". They are different questions, and the ramps above are the
+// wrong instrument for the second one: a ramp puts its neighbours next to
+// each other by construction, so lines 7 and 8 of a viridis differ by a
+// shade nobody can name and the legend is the only thing separating them.
+// A palette spends its colours the other way -- every entry as far from
+// every other as the space allows -- which is what lets a stroke be
+// identified on its own, without reading a key. That is what a plot of
+// named lines actually needs, so it is what the plot opens on.
+//
+// Both palettes are generated rather than borrowed, by farthest-point
+// selection in CIELAB under CIEDE2000: each colour in turn is the one
+// furthest from the ground it is drawn on, from the accent drawn over it,
+// and from every colour already taken. That ordering is the point -- the
+// first k entries are near-maximally separated for *any* k, so six lines
+// are as distinguishable as twenty and simply take the first six.
+//
+// The two scopes are the same hues solved twice, for the rule the light
+// scope above is solved for: a colour reads against white as strongly as
+// its counterpart reads against black. A line therefore keeps its identity
+// when the theme flips -- the green one is still the green one -- and
+// changes only its weight. Where a hue has no deep form that is still a
+// colour (the cyans and the yellows, which go grey or olive before they go
+// dark) it is lightened until it does, which is the concession the signal
+// colours already make at amber700 and red700.
+//
+// Every entry clears WCAG's 3:1 non-text contrast against its own scope's
+// ground -- 3.9:1 at the very worst -- so no line is drawn in something
+// the reader has to hunt for on either theme.
+//
+// The three published cycles below are here on a different argument, and
+// it beats that one. `spectrum` and `safe` are solved for this
+// application's two grounds and for nothing else, which means a figure
+// drawn here and the same figure redrawn by a collaborator in matplotlib
+// or R are two different pictures of one dataset. Okabe-Ito and Paul Tol's
+// sets are the ones a reader's field already agrees on -- they are what
+// journals ask for and what every plotting library ships -- so a plot
+// exported from here lands in a paper beside plots that match it. That is
+// worth more than a contrast figure, so they are kept at their published
+// values, entry for entry, and are what this plot opens on. Okabe-Ito's
+// order has one departure, argued where it is made: its achromatic entry
+// is drawn last rather than first, so that a plot of one line opens on a
+// colour.
+//
+// What it costs, stated plainly so that nobody "fixes" it later: these
+// were designed for ink on paper, and it shows in the light scope. Okabe-
+// Ito's yellow carries about 1.25:1 against white and Tol bright's yellow
+// and grey are little better. On the dark theme they are all comfortable.
+// Deepening them would make the light theme easier and would also mean
+// that "Okabe-Ito" here is not Okabe-Ito, which is the whole of what they
+// are being taken for. A reader who wants a cycle solved for a screen has
+// `spectrum` and `safe` one pick away.
+//
+// A *function* of which ground rather than a plain object, and that is the
+// whole of what lets the picture that leaves be drawn in the light scope
+// while the reader stays in the dark one. Three of these five differ
+// between the scopes and two do not; writing the light set out a second
+// time for the picture would be five palettes kept in two places, and the
+// two that do not differ would be the ones to drift. See `paperPalettes`
+// below, which is this called with the other answer.
 std::optional<std::vector<Rgba>> palette(std::string_view name, bool onDark)
 {
     if (name == "okabe-ito") {
+        // Okabe and Ito's Color Universal Design set, the eight of it.
+        //
+        // Black is the one entry that cannot survive the dark scope -- it is
+        // the ground -- so it is drawn at signal white there, which is the
+        // same substitution every dark-theme port of this palette makes. The
+        // other seven are identical in both scopes: they were chosen to hold
+        // apart under all three dichromacies, and re-solving them for a black
+        // ground would be a different palette wearing this one's name.
+        //
+        // The achromatic entry is drawn *last* rather than first, and that
+        // is the one departure from the published order in this table. Its
+        // colours are the published colours and its cycle is the published
+        // cycle; what moved is where the set starts. Published, it starts
+        // on black -- which is fine in a figure of eight lines and is the
+        // wrong opening for a plot that usually has one, because the first
+        // thing this application draws is then the only line on the pane
+        // and it is drawn in an ink the reader cannot tell from the
+        // chrome. So the cycle opens on the orange and closes on the
+        // black. A reader comparing a figure from here with one from
+        // matplotlib still finds the same eight colours saying the same
+        // eight things; they are offset by one.
         return stopsOf({"#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7",
                         onDark ? kN11 : kN0});
     }
     if (name == "tol bright") {
+        // Paul Tol's bright scheme: seven, colour-blind safe, and the one most
+        // often reached for where a handful of lines need naming.
         return stopsOf(
             {"#4477AA", "#EE6677", "#228833", "#CCBB44", "#66CCEE", "#AA3377", "#BBBBBB"});
     }
     if (name == "tol muted") {
+        // ...and his muted scheme, nine of them, for the same job where the
+        // bright one is louder than the page wants. Tol's pale grey for "data
+        // that is not a category" is deliberately left out: every entry here
+        // is a line, and a line drawn in the colour reserved for "none of
+        // these" is a line saying something it does not mean.
         return stopsOf({"#CC6677", "#332288", "#DDCC77", "#117733", "#88CCEE", "#882255", "#44AA99",
                         "#999933", "#AA4499"});
     }
     if (name == "spectrum") {
+        // Twenty colours, no two closer than 13.1 dE00 in either scope. For
+        // scale: matplotlib's tab20 manages 12.1 across its twenty, and does
+        // it against one ground rather than two.
         if (onDark) {
             return stopsOf({"#B64EF5", "#F6330C", "#009700", "#0089C4", "#C99400",
                             "#FF9DBB", "#00CFC6", "#ACB5FF", "#64F44D", "#FFA379",
@@ -142,6 +237,15 @@ std::optional<std::vector<Rgba>> palette(std::string_view name, bool onDark)
                         "#C90090", "#009276", "#A55500", "#006684", "#006237", "#444B00"});
     }
     if (name == "safe") {
+        // Ten that hold apart under protanopia, deuteranopia and tritanopia as
+        // well as under ordinary vision: 7.8 dE00 at the worst, simulated
+        // four ways in both scopes. tab10 falls to 1.9 on the same measure and
+        // Okabe-Ito's seven reach 8.7 -- but Okabe-Ito's yellow carries 1.3:1
+        // against white, which is a line the light theme cannot show at all.
+        //
+        // Shorter than the spectrum on purpose. Colours that survive all three
+        // dichromacies at once are a small set, and padding the list would
+        // only be a longer list of colours some readers cannot tell apart.
         if (onDark) {
             return stopsOf({"#0088CB", "#B37400", "#FFAE7F", "#CCB5FF", "#FB0080", "#00F3BD",
                             "#FF8798", "#00A98C", "#798DFF", "#FC43E7"});
@@ -238,6 +342,81 @@ LineColours LineColours::drawn(bool onDark) const
     return out;
 }
 
+// The colour of line `series`, drawn `position` of `count`.
+//
+// Three numbers for one line, because the two kinds of cycle ask
+// different questions of it. `series` is *which* line it is -- its own
+// index in the legend, the number that names it whether it is drawn or
+// not -- and it is the whole of a palette's answer. `position` and
+// `count` place it among the lines currently drawn, which is what a map
+// needs and what a palette ignores: a share of a continuum only exists
+// once you know how many shares there are. The rest of this note is about
+// the maps.
+//
+// The lines sit at the *middles* of `count` equal shares of the map
+// rather than at its ends: line i of n is drawn at (i + 1) / (n + 1), so
+// one line takes the middle colour, two take the thirds, three the
+// quarters, and so on. The ends of the map are never reached.
+//
+// That is the point of it. Every perceptual ramp runs from something very
+// dark to something very pale, and both of those are a line nobody can
+// see: on this plot's true-black ground the first line of a viridis was
+// very nearly invisible, and on a white one the last line of a hot is.
+// Spreading the lines end to end spent the two worst colours in the map
+// on two of the lines every time, and did it worst in the case that
+// matters most -- a single line, which took the very first colour and
+// nothing else.
+//
+// The reader's own band (colorFrom .. colorTo) still applies on top, so
+// narrowing the map narrows what these shares are taken out of.
+//
+// `paper` is the fourth number and the only one that is not about which
+// line this is: it asks for the colour the *light* scope would draw,
+// whatever scope is on screen. That is what a publication export is --
+// see the paper block in Theme -- and it is asked here rather than
+// substituted afterwards because "the same picture in the other scope"
+// is a property of every branch below and not of the answer. Until 0.6.4
+// the picture that left was every stroke in one black ink, which is the
+// one thing a colour cycle exists to not be: six traces pasted into a
+// document were six identical strokes with a caption naming colours that
+// were not in the picture.
+//
+// A colour the reader gave this line beats every cycle, and beats it
+// first: a cycle answers "which line is this" for lines that are alike,
+// and the lines of a custom tab were each put there on purpose. The
+// override is per line and nothing else moves, which is the same
+// promise a palette makes about its own index and for the same reason
+// -- a reader watching one stroke must not see it change under them
+// because they said something about another.
+//
+// Asked of the plot rather than held here, because both plots are
+// drawn by this file and only one of them has any: DatasetPlot answers
+// "no" for every line. Plot tab lines are rows or columns of one
+// dataset and their place in the table is what identifies them.
+//
+// A palette is asked which line this is rather than how far along it
+// sits, so none of the arithmetic below applies to one: not the shares
+// -- there is no continuum to take shares of -- and not the reader's
+// band. The line's own index is the answer, counted along a cycle that
+// repeats, and it does not move when a line is added or taken away.
+// That is the second thing a palette buys over a map: on a map every
+// line changes colour when one of them is unticked.
+//
+// `series` and not `position`, which is the whole of that promise.
+// Asked where the line sat among the drawn ones, a palette kept the
+// promise only until the reader unticked something: hiding the first
+// of five lines handed the second line the first one's colour, and the
+// reader watching one stroke saw it change under them -- the exact
+// failure a palette is here to not have.
+//
+// Across the reader's own slice of the map rather than across the
+// whole of it. Untouched that slice is the whole of it, so the
+// arithmetic is a no-op until they say otherwise.
+//
+// The ramps are the one part of this that has no second scope: they
+// are named colour maps kept as they are defined elsewhere, so a
+// viridis on paper is the viridis a reader in the light theme sees and
+// the viridis matplotlib draws. See Theme.colorRamps.
 Rgba seriesColor(const LineColours& chosen, int series, int position, int count, bool paper,
                  bool onDark, const std::optional<Rgba>& own)
 {
@@ -269,6 +448,15 @@ Rgba seriesColor(const LineColours& chosen, int series, int position, int count,
     return rampColor(stops.value_or(std::vector<Rgba>{}), at);
 }
 
+// How strongly a line is drawn. One line has nothing to separate from and
+// takes full strength; a bundle separates by overlap and is drawn under
+// it. A highlighted line comes forward and the rest go further back, so
+// the one being followed is the one that reads.
+//
+// Only a bundle is drawn under. A custom tab's lines used to be as well,
+// so adding a second line to one dimmed the first to 0.55 on the dark
+// theme -- two lines chosen one at a time, each drawn fainter than it was
+// alone, when there was no pile-up to show.
 double seriesOpacity(int series, int count, int highlighted, bool bundle, bool onDark)
 {
     const double bundled = onDark ? 0.55 : 0.95;
@@ -278,6 +466,8 @@ double seriesOpacity(int series, int count, int highlighted, bool bundle, bool o
     return bundle && count > 1 ? bundled : 1.0;
 }
 
+// How heavily. A line being followed is drawn thicker as well as brighter:
+// at a hairline, opacity alone is not enough to pick one out of fifty.
 double seriesWidth(int series, int highlighted, double lineWidth)
 {
     return series == highlighted ? lineWidth * 2.0 : lineWidth;

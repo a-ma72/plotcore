@@ -23,6 +23,39 @@ constexpr double kInfinity = std::numeric_limits<double>::infinity();
 
 /// What a pane `pixels` device pixels across is read against: down to the
 /// quantum, as PaneColumns rounds it, and within what a line may be thinned to.
+// Tell it how wide the pane is, in columns.
+//
+// A bucket is a column: what a line is thinned to is a property of the
+// pane it is drawn in and not a constant, and the number used to be a
+// constant in both directions -- fewer buckets than pixels on a wide
+// screen, which draws an envelope as a hatch of separated teeth instead of
+// a band, and more points than anyone can tell apart on a narrow one.
+//
+// The frame rather than the plot area inside it, which is not a rounding:
+// the area's left gutter is measured off the widest y tick label, that
+// label is measured off the extent of the data, and the extent moves when
+// the resolution does -- a finer bucket can find a more extreme value. So
+// a resolution taken from the area is a resolution that decides the gutter
+// that decides the resolution, which is exactly the binding loop Qt
+// reported the first time this was written that way. The frame's own width
+// depends on nothing the plot draws.
+//
+// It overestimates by the gutters, which is what the renderer's tolerance
+// for a few points per column is for -- see kSamplesPerColumn. Quantised
+// on the other side, so dragging the window's edge does not re-read the
+// file once a pixel.
+//
+// In *device* pixels, which is the other half of "a bucket is a column".
+// A pane is laid out in logical pixels and drawn into a framebuffer with
+// devicePixelRatio of them for each one, so thinning to the logical width
+// on a HiDPI screen hands the renderer one bucket per two or three
+// physical columns -- a band drawn at half or a third of the resolution
+// the display has, which is the whole of what oversampling would have
+// bought and is free to ask for correctly instead.
+//
+// Along x, which on a flipped pane is up it: the frame's height, less the
+// title's line, which is as independent of what the plot draws as the
+// width's gutter is.
 int columnsOf(double pixels)
 {
     const int columns = static_cast<int>(std::max(pixels, 0.0));
@@ -453,6 +486,10 @@ void Figure::refresh()
     camera_.y.minimumSpan = 0.0;
 }
 
+// Where the window on the common axis sits within the whole of it, as
+// a fraction from the bottom -- in the axis's own positions, so on a
+// logarithmic common axis a zoom into the top decade is a zoom into the
+// top of every separate axis too.
 double Figure::commonFraction(double value) const
 {
     const CameraAxis& y = camera_.y;
