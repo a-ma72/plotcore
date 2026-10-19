@@ -38,7 +38,7 @@ The crates are not on crates.io. Use them from the
 [repository](https://github.com/jonassattler/plotcore), at a release's tag:
 
 ```sh
-cargo add plotcore plotcore-egui --git https://github.com/jonassattler/plotcore --tag v0.1.0
+cargo add plotcore plotcore-egui --git https://github.com/jonassattler/plotcore --tag v0.2.0
 ```
 
 `plotcore-sys` compiles plotcore's C++ itself, with the `cc` crate, so building

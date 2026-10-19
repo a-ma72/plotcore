@@ -468,7 +468,7 @@ dependencies = [
 
 [[package]]
 name = "egui-demo"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "eframe",
  "egui",
@@ -1688,14 +1688,14 @@ checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 
 [[package]]
 name = "plotcore"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "plotcore-sys",
 ]
 
 [[package]]
 name = "plotcore-egui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "egui",
  "plotcore",
@@ -1703,7 +1703,7 @@ dependencies = [
 
 [[package]]
 name = "plotcore-sys"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cc",
 ]
