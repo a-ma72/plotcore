@@ -402,7 +402,7 @@ PLOTCORE_API int64_t plotcore_held_bytes(const plotcore_figure* figure);
  *   titlePixels axisNamePixels legendPixels notePixels gapXS gapS gapM gapL
  *   s3 s9 labelMargin accentWidth ruleWidth tickLength exponentRaise
  *   lineWidth markerSize radius pointerSize legendSwatch legendRows
- *   tickTarget denseFactor
+ *   dragDistance tickTarget denseFactor
  *
  * Four of the plot's settings are a host's to decline: `readout` writes the
  * reading under the pointer in the pane, `bandReadout` writes a band's

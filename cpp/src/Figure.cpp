@@ -296,6 +296,7 @@ void Figure::setSource(LineSource* source)
     source_ = source;
     // A drag holds a line by its number, and the numbers are the old source's.
     drag_ = Drag::None;
+    banding_ = false;
     dragLine_ = -1;
 }
 
@@ -322,6 +323,7 @@ void Figure::removeLine(int line)
     }
     if (dragLine_ == line) {
         drag_ = Drag::None;
+        banding_ = false;
         dragLine_ = -1;
     }
     else if (dragLine_ > line) {
@@ -335,6 +337,7 @@ void Figure::clear()
     lines_.clear();
     settings_.highlighted = -1;
     drag_ = Drag::None;
+    banding_ = false;
     dragLine_ = -1;
     camera_.reset();
 }
@@ -1168,7 +1171,7 @@ Scene Figure::compose(const SceneRequest& request)
         double py = 0.0;
     };
     std::optional<Taken> taken;
-    if (!request.picture && settings_.cursor && pointer_.has_value() && drag_ != Drag::Band &&
+    if (!request.picture && settings_.cursor && pointer_.has_value() && !banding_ &&
         scene.message.empty()) {
         const double px = pointer_->x() - a.x;
         const double py = pointer_->y() - a.y;
@@ -1338,7 +1341,7 @@ Scene Figure::compose(const SceneRequest& request)
     }
 
     // --- the band ------------------------------------------------------------------
-    if (!request.picture && drag_ == Drag::Band) {
+    if (!request.picture && drag_ == Drag::Band && banding_) {
         // The band is clamped to the pane rather than merely clipped, because
         // its corners are what the numbers are read out of as well as what the
         // rectangle is drawn from: the band, the numbers beside it and the
@@ -1699,6 +1702,20 @@ std::vector<std::string> Figure::wrapped(const std::string& text, double width, 
 
 // --- gestures -------------------------------------------------------------------
 
+std::string Figure::xNumber(double value)
+{
+    refresh();
+    const Layout lay = layout();
+    return axisLabel(value, camera_.x.viewLow(), camera_.x.viewHigh(), lay.xTicks.logarithmic);
+}
+
+std::string Figure::yNumber(double value)
+{
+    refresh();
+    const Layout lay = layout();
+    return axisLabel(value, camera_.y.viewLow(), camera_.y.viewHigh(), lay.yTicks.logarithmic);
+}
+
 int Figure::lineAt(double px, double py, double reach)
 {
     refresh();
@@ -1831,6 +1848,7 @@ void Figure::press(double px, double py, Button button, Modifiers modifiers)
     pressed_ = last_ = Point(px, py);
     pointer_ = Point(px, py);
     moved_ = false;
+    banding_ = false;
     controlClick_ = false;
     dragLine_ = -1;
     if (button == Button::Right) {
@@ -1857,6 +1875,9 @@ void Figure::move(double px, double py, Modifiers)
     const double dx = px - last_.x();
     const double dy = py - last_.y();
     moved_ = moved_ || std::abs(px - pressed_.x()) > 2.0 || std::abs(py - pressed_.y()) > 2.0;
+    banding_ =
+        banding_ || (drag_ == Drag::Band && (std::abs(px - pressed_.x()) > style_.dragDistance ||
+                                             std::abs(py - pressed_.y()) > style_.dragDistance));
     if (drag_ == Drag::Pan) {
         camera_.panBy(dx, dy);
         // A drag has nowhere it is heading (PlotSurface.panBy).
@@ -1874,6 +1895,7 @@ void Figure::release(double px, double py, Button button, Modifiers)
     last_ = Point(px, py);
     if (drag_ == Drag::Band && button == Button::Right) {
         drag_ = Drag::None;
+        banding_ = false;
         // A stated region is a reader who has already said where they are
         // going, so it is said to the lines too (PlotSurface.zoomToRegion).
         std::optional<GestureFocus> focus;
@@ -1884,6 +1906,7 @@ void Figure::release(double px, double py, Button button, Modifiers)
     }
     if (drag_ == Drag::Pan && controlClick_ && !moved_) {
         drag_ = Drag::None;
+        banding_ = false;
         const int line = lineAt(px, py);
         if (line >= 0) {
             // Put back: on the common axis, unmoved and unscaled.
@@ -1895,12 +1918,14 @@ void Figure::release(double px, double py, Button button, Modifiers)
         return;
     }
     drag_ = Drag::None;
+    banding_ = false;
 }
 
 void Figure::doubleClick(double, double, Button button)
 {
     if (button == Button::Left) {
         drag_ = Drag::None;
+        banding_ = false;
         resetView();
     }
 }

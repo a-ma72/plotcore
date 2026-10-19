@@ -114,6 +114,12 @@ struct FigureStyle
     /// rest (Theme.plotLegendSwatch, plotLegendRows).
     double legendSwatch = 12.0;
     int legendRows = 12;
+    /// How far the pointer travels, across or down, before a press becomes a
+    /// drag: QStyleHints::startDragDistance, which a host sets from its
+    /// platform. A band is drawn, and the crosshair put away for it, only
+    /// once a right press has gone that far -- as the viewer's DragHandler
+    /// waits for the platform's threshold before it is a band at all.
+    double dragDistance = 10.0;
     int tickTarget = 8;
     int denseFactor = 4;
 
@@ -531,6 +537,14 @@ public:
     [[nodiscard]] Scene scene() { return scene(SceneRequest{}); }
     [[nodiscard]] Scene scene(const SceneRequest& request);
 
+    /// A value on an axis, written as that axis writes its ticks -- to the
+    /// decimals the span on screen asks for, logarithmically where the axis
+    /// is numbered so (PlotSurface.xNumber and yNumber). What the band's
+    /// corners are written in, and what a host writing a position in words of
+    /// its own asks.
+    [[nodiscard]] std::string xNumber(double value);
+    [[nodiscard]] std::string yNumber(double value);
+
     /// The line drawn nearest (`px`, `py`), within `reach` pixels, or -1.
     [[nodiscard]] int lineAt(double px, double py, double reach = 12.0);
 
@@ -615,6 +629,8 @@ private:
     Point last_;
     int dragLine_ = -1;
     bool moved_ = false;
+    /// Whether a right press has gone far enough to be a band.
+    bool banding_ = false;
     bool controlClick_ = false;
     std::optional<Point> pointer_;
 };
