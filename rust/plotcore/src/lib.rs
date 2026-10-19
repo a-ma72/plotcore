@@ -1258,7 +1258,7 @@ mod tests {
     #[test]
     fn the_library_is_the_one_this_crate_speaks_to() {
         assert_eq!(abi_version(), sys::PLOTCORE_ABI_VERSION);
-        assert_eq!(version(), "0.1.0");
+        assert_eq!(version(), "0.2.0");
         assert_eq!(palette_names()[0], "okabe-ito");
         assert_eq!(ramp_names()[1], "viridis");
         let okabe = palette("okabe-ito", true).unwrap();

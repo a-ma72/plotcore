@@ -8,7 +8,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "plotcore"
-version = "0.1.0"
+version = "0.2.0"
 description = "The plot H5Scope draws, for Python: an envelope that keeps every spike, zoomed without rereading, with the same axes, gestures and colours."
 readme = "README.md"
 license = { text = "GPL-3.0-only" }
