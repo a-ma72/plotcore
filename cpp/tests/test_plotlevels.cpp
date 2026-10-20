@@ -225,6 +225,23 @@ TEST_CASE("the finest run that covers the pane is the one drawn", "[levels]")
         const std::vector<plotcore::HeldLevel> away{held(90000, 4096, 2, 2048)};
         CHECK(plotcore::drawnLevel(away, view) == -1);
     }
+
+    SECTION("of two as fine, the one held last")
+    {
+        // Two runs a quarter apart that both cover the view: the earlier was
+        // asked for on the way here, the later by the view as it is. A ladder
+        // that was not on that way holds only the later, and the two ladders
+        // must agree about what is drawn.
+        const std::vector<plotcore::HeldLevel> both{held(32768, 32768, 16, 2048),
+                                                    held(36864, 32768, 16, 2048)};
+        const std::vector<plotcore::HeldLevel> later{held(36864, 32768, 16, 2048)};
+        const int fromBoth = plotcore::drawnLevel(both, view);
+        const int fromLater = plotcore::drawnLevel(later, view);
+        REQUIRE(fromBoth == 1);
+        REQUIRE(fromLater == 0);
+        CHECK(both[static_cast<std::size_t>(fromBoth)].window ==
+              later[static_cast<std::size_t>(fromLater)].window);
+    }
 }
 
 TEST_CASE("the ladder reads towards where the reader is zooming", "[levels]")

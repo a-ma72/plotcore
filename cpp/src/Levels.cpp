@@ -332,13 +332,21 @@ int drawnLevel(std::span<const HeldLevel> held, const LevelView& view)
     // of points, so a finer one is more detail on screen for the same cost --
     // and the coarser ones are still here for the moment the reader zooms out
     // past this one, which is the whole reason there is more than one.
+    //
+    // Of two as fine, the one held last. It answered the view as it is now;
+    // the other answered a view the reader has since left, and which of those
+    // a ladder still holds is its history rather than the view's. Two ladders
+    // asked about one view must draw from the same run when both hold it -- a
+    // line and the time base its x is read from, which a host sharpens through
+    // the views on the way to this one -- or the line runs past the end of its
+    // axis's run, and every point out there is placed by the coarse whole.
     int best = -1;
     for (std::size_t i = 0; i < held.size(); ++i) {
         const HeldLevel& level = held[i];
         if (!level.complete || !level.window.covers(low, high)) {
             continue;
         }
-        if (best < 0 || level.window.bucket < held[static_cast<std::size_t>(best)].window.bucket) {
+        if (best < 0 || level.window.bucket <= held[static_cast<std::size_t>(best)].window.bucket) {
             best = static_cast<int>(i);
         }
     }

@@ -468,7 +468,8 @@ struct ZoomFocus
 inline constexpr int kPrefetchOctaves = 2;
 
 /// The finest run in hand that covers what is on screen and can be drawn from,
-/// or -1.
+/// or -1. Of two as fine, the one held last: the one the view as it is now
+/// asked for.
 ///
 /// The whole-line summary covers everything by construction and is what is
 /// drawn when this finds nothing, which is why zooming past the runs held is a
