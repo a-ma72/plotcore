@@ -92,24 +92,83 @@ Extremes extremesOf(const double* values, long long from, long long to)
     return found;
 }
 
+void joinSeam(Extremes& found, double exit, double entry, long long entryAt)
+{
+    // No stroke through a value that is not one: a chord to or from a NaN is
+    // a line across a gap, and a run with no extremes is a gap already.
+    if (!found.found() || !std::isfinite(exit) || !std::isfinite(entry)) {
+        return;
+    }
+    // Strict, as the scan is. The entry is the latest element there is, so an
+    // equal value has an earlier occurrence, and the earlier is the one named.
+    if (entry < found.lowest) {
+        found.lowest = entry;
+        found.lowAt = entryAt;
+    }
+    else if (entry > found.highest) {
+        found.highest = entry;
+        found.highAt = entryAt;
+    }
+}
+
+void joinSeam(double* pair, double* pairAt, double exit, double entry, double entryAt)
+{
+    if (pair == nullptr) {
+        return;
+    }
+    // The pair back as the extremes it was folded from. Without positions the
+    // two are only known to be in order, which is all first() and second()
+    // ask: 0 and 1 for them, and 2 for the entry, which comes after both.
+    Extremes found;
+    const bool rising = pair[0] <= pair[1];
+    found.lowest = rising ? pair[0] : pair[1];
+    found.highest = rising ? pair[1] : pair[0];
+    if (std::isnan(found.lowest) || std::isnan(found.highest)) {
+        return; // a gap, which has no seam
+    }
+    const double firstAt = pairAt != nullptr ? pairAt[0] : 0.0;
+    const double secondAt = pairAt != nullptr ? pairAt[1] : 1.0;
+    // Positions are elements, so they are whole and the cast is exact.
+    found.lowAt = static_cast<long long>(rising ? firstAt : secondAt);
+    found.highAt = static_cast<long long>(rising ? secondAt : firstAt);
+    joinSeam(found, exit, entry, static_cast<long long>(pairAt != nullptr ? entryAt : 2.0));
+    pair[0] = found.first();
+    pair[1] = found.second();
+    if (pairAt != nullptr) {
+        pairAt[0] = static_cast<double>(found.firstAt());
+        pairAt[1] = static_cast<double>(found.secondAt());
+    }
+}
+
 long long wholeBuckets(long long length, long long bucket)
 {
     return length > bucket ? (length / bucket) * bucket : length;
 }
 
-void reduceBucketsInto(const double* values, long long count, long long bucket, double* out)
-{
-    if (values == nullptr || out == nullptr || count <= 0) {
-        return;
-    }
-    const long long width = std::max<long long>(bucket, 1);
-    const long long taken = (count + width - 1) / width;
+namespace {
 
+/// The element after bucket `b`'s last one, for its seam: in the buffer for
+/// every bucket but the last, and `next` for that one.
+[[nodiscard]] double seamOf(const double* values, long long to, long long count, double next)
+{
+    return to < count ? values[to] : next;
+}
+
+/// The fold of reduceBucketsInto(), with each bucket's seam or without: with
+/// for elements, without for a buffer of pairs, whose seams came up with them
+/// (see coarsenEnvelope()). One loop, so the two cannot come apart.
+void foldInto(const double* values, long long count, long long width, double* out, bool seams,
+              double next)
+{
+    const long long taken = (count + width - 1) / width;
     const auto nothing = std::numeric_limits<double>::quiet_NaN();
     for (long long b = 0; b < taken; ++b) {
         const long long from = b * width;
         const long long to = std::min(from + width, count);
-        const Extremes found = extremesOf(values, from, to);
+        Extremes found = extremesOf(values, from, to);
+        if (seams) {
+            joinSeam(found, values[to - 1], seamOf(values, to, count, next), to);
+        }
         if (!found.found()) {
             // Nothing drawable in the whole bucket. A pair of NaN is a gap, and
             // a gap is what that is -- dropping the bucket instead would slide
@@ -123,8 +182,19 @@ void reduceBucketsInto(const double* values, long long count, long long bucket, 
     }
 }
 
+} // namespace
+
+void reduceBucketsInto(const double* values, long long count, long long bucket, double* out,
+                       double next)
+{
+    if (values == nullptr || out == nullptr || count <= 0) {
+        return;
+    }
+    foldInto(values, count, std::max<long long>(bucket, 1), out, true, next);
+}
+
 void reduceBuckets(const double* values, long long count, long long bucket,
-                   std::vector<double>& out)
+                   std::vector<double>& out, double next)
 {
     if (values == nullptr || count <= 0) {
         return;
@@ -133,11 +203,11 @@ void reduceBuckets(const double* values, long long count, long long bucket,
     const long long taken = (count + width - 1) / width;
     const std::size_t was = out.size();
     out.resize(was + static_cast<std::size_t>(taken) * 2);
-    reduceBucketsInto(values, count, width, out.data() + was);
+    reduceBucketsInto(values, count, width, out.data() + was, next);
 }
 
 void reduceBucketsLocated(const double* values, long long count, long long bucket, long long origin,
-                          std::vector<double>& out, std::vector<double>& positions)
+                          std::vector<double>& out, std::vector<double>& positions, double next)
 {
     if (values == nullptr || count <= 0) {
         return;
@@ -149,11 +219,11 @@ void reduceBucketsLocated(const double* values, long long count, long long bucke
     out.resize(was + static_cast<std::size_t>(taken) * 2);
     positions.resize(wasAt + static_cast<std::size_t>(taken) * 2);
     reduceBucketsLocatedInto(values, count, width, origin, out.data() + was,
-                             positions.data() + wasAt);
+                             positions.data() + wasAt, next);
 }
 
 void reduceBucketsLocatedInto(const double* values, long long count, long long bucket,
-                              long long origin, double* out, double* positions)
+                              long long origin, double* out, double* positions, double next)
 {
     if (values == nullptr || out == nullptr || positions == nullptr || count <= 0) {
         return;
@@ -162,7 +232,9 @@ void reduceBucketsLocatedInto(const double* values, long long count, long long b
     const long long taken = (count + width - 1) / width;
     for (long long b = 0; b < taken; ++b) {
         const long long from = b * width;
-        const Extremes found = extremesOf(values, from, std::min(from + width, count));
+        const long long to = std::min(from + width, count);
+        Extremes found = extremesOf(values, from, to);
+        joinSeam(found, values[to - 1], seamOf(values, to, count, next), to);
         if (!found.found()) {
             out[2 * b] = out[2 * b + 1] = std::numeric_limits<double>::quiet_NaN();
             positions[2 * b] = positions[2 * b + 1] = static_cast<double>(origin + from);
@@ -182,8 +254,10 @@ void coarsenEnvelopeInto(const double* pairs, long long buckets, long long facto
     }
     // See the header: the pair buffer is already a sequence in occurrence
     // order, so folding it by twice the factor is the same question
-    // reduceBuckets() asks of the elements themselves.
-    reduceBucketsInto(pairs, buckets * 2, std::max<long long>(factor, 1) * 2, out);
+    // reduceBuckets() asks of the elements themselves -- with no seam, because
+    // the pairs carry theirs.
+    foldInto(pairs, buckets * 2, std::max<long long>(factor, 1) * 2, out, false,
+             std::numeric_limits<double>::quiet_NaN());
 }
 
 void coarsenEnvelopeLocatedInto(const double* pairs, const double* pairAt, long long buckets,
@@ -220,7 +294,11 @@ void coarsenEnvelope(const double* pairs, long long buckets, long long factor,
     if (pairs == nullptr || buckets <= 0) {
         return;
     }
-    reduceBuckets(pairs, buckets * 2, std::max<long long>(factor, 1) * 2, out);
+    const long long width = std::max<long long>(factor, 1) * 2;
+    const std::size_t was = out.size();
+    out.resize(was + static_cast<std::size_t>((buckets * 2 + width - 1) / width) * 2);
+    foldInto(pairs, buckets * 2, width, out.data() + was, false,
+             std::numeric_limits<double>::quiet_NaN());
 }
 
 namespace {

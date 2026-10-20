@@ -47,6 +47,7 @@
 #include "plotcore/Projection.hpp"
 
 #include <cstddef>
+#include <limits>
 #include <span>
 #include <vector>
 
@@ -74,7 +75,9 @@ struct PyramidLevel
     /// case bolted on: it is what DatasetTableModel::sampleFrom already does
     /// when the stride comes out at one, because an envelope of a single
     /// element would be that element written down twice. Everything coarser is
-    /// a pair per bucket, its two extremes in the order they occurred.
+    /// a pair per bucket, its two extremes in the order they occurred -- its
+    /// seam included, the first element of the bucket after it, so a level of
+    /// pairs coarsens to the next one exactly (see Levels.hpp).
     std::vector<double> values;
 
     /// The element each of `values` is, for a level of pairs; empty for a
@@ -83,7 +86,9 @@ struct PyramidLevel
     /// Written as the level is built, out of the fold that already finds each
     /// extreme -- see PlotLine::positions for why the drawing wants it. Held as
     /// doubles because that is what the renderer is handed, and exact: a double
-    /// counts every element of any line that fits in memory.
+    /// counts every element of any line that fits in memory. A seam is the
+    /// next bucket's first element, so a pair's second position may be the
+    /// next pair's first.
     std::vector<double> at;
 
     [[nodiscard]] long long buckets() const
@@ -198,12 +203,19 @@ public:
     [[nodiscard]] LinePyramid finish();
 
 private:
+    /// Join the last base bucket's seam, now that `entry`, the first element
+    /// after it, has arrived.
+    void joinLastSeam(double entry);
+
     LinePyramid pyramid_;
     long long base_ = 1;
     long long taken_ = 0;
     /// Elements folded into the base so far: the index of the next one, which
     /// is what each extreme of a coarse base is counted from.
     long long folded_ = 0;
+    /// The last element folded into a base of pairs: the stroke out of its
+    /// last bucket starts here, and is joined when the next element arrives.
+    double exit_ = std::numeric_limits<double>::quiet_NaN();
     /// Elements read but not yet folded into the base.
     std::vector<double> carry_;
 };
@@ -220,9 +232,11 @@ private:
 ///
 /// `out` is left holding exactly what a read of that window would have
 /// answered with: `window.columns` raw values when the bucket is one, and a
-/// pair per bucket otherwise. False when the pyramid cannot answer -- it holds
-/// nothing, or the window is finer than its base, or the window is not aligned
-/// to a bucket the pyramid has. The caller reads the file for those.
+/// pair per bucket otherwise -- the last bucket's seam included, the element
+/// after the window, which a read of it takes too (see RunLadder). False when
+/// the pyramid cannot answer -- it holds nothing, or the window is finer than
+/// its base, or the window is not aligned to a bucket the pyramid has. The
+/// caller reads the file for those.
 ///
 /// `positions`, when it is set, receives the element each value of an envelope
 /// is: one index per value in `out`, in the same order, out of the positions
@@ -251,8 +265,13 @@ private:
                              long long& stride, double& step,
                              std::vector<double>* positions = nullptr);
 
-/// The extremes of elements `[first, last)`, out of whichever levels cover
-/// that run in the fewest buckets.
+/// The extremes of elements `[first, last)` and of the stroke out of them, out
+/// of whichever levels cover that run in the fewest buckets.
+///
+/// The stroke is the run's seam: element `last`, where it and the one before
+/// it are finite (see Levels.hpp). A seam folded into a pair cannot be taken
+/// back out of it, so a run is never asked for without one -- and the whole
+/// line, which has nothing after it, is asked for exactly.
 ///
 /// Any run at all, not only an aligned one: it is cut into the largest aligned
 /// buckets that fit -- a few from each level on the way up and the way back
@@ -293,6 +312,12 @@ private:
 /// in the order they occurred, at the elements extremesOver() names. Drawing
 /// them at the column's first element and half way along it split a rise
 /// across two columns by distance rather than by where the extreme was.
+///
+/// Each folded column takes in its seam, the next column's first element, as
+/// any bucket does: the columns fall between elements, and the left one takes
+/// the whole chord across its edge. A column of elements has no extremes to
+/// take its seam into, so the folded column after it opens with its own first
+/// element instead, and the stroke between them is the line's.
 struct ColumnFold
 {
     std::vector<double> values;
@@ -311,7 +336,8 @@ struct ColumnFold
 /// column narrower than one element holds nothing and adds nothing. A column
 /// with nothing finite in it is one NaN, which is a gap.
 ///
-/// `out` is cleared first. Its size is at most twice the number of columns.
+/// `out` is cleared first. Its size is at most two a column, and one more
+/// where a column of elements meets a folded one.
 void foldColumns(const LinePyramid& pyramid, std::span<const double> edges, ColumnFold& out);
 
 } // namespace plotcore

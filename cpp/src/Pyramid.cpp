@@ -173,8 +173,15 @@ void buildLevels(LinePyramid& pyramid)
                            return;
                        }
                        if (raw) {
+                           // The element after this piece is the seam of its
+                           // last bucket, and it is in the base whatever thread
+                           // folds the piece after it.
+                           const long long end = first + count;
                            reduceBucketsLocatedInto(source + first, count, factor, first,
-                                                    out + from * 2, outAt + from * 2);
+                                                    out + from * 2, outAt + from * 2,
+                                                    end < sourceBuckets
+                                                        ? source[end]
+                                                        : std::numeric_limits<double>::quiet_NaN());
                        }
                        else {
                            coarsenEnvelopeLocatedInto(source + first * 2, sourceAt + first * 2,
@@ -223,7 +230,9 @@ void PyramidBuilder::add(const double* values, long long count)
             bottom.values.insert(bottom.values.end(), from, from + many);
         }
         else {
+            joinLastSeam(from[0]);
             reduceBucketsLocated(from, many, base_, folded_, bottom.values, bottom.at);
+            exit_ = from[many - 1];
         }
         folded_ += many;
     };
@@ -246,6 +255,20 @@ void PyramidBuilder::add(const double* values, long long count)
     }
 }
 
+void PyramidBuilder::joinLastSeam(double entry)
+{
+    // Every fold of the base ends on a bucket boundary -- whole buckets, and
+    // the rest carried -- so its last bucket is waiting on the first element of
+    // the next one for its seam, and this is that element.
+    std::vector<double>& values = pyramid_.levels.front().values;
+    std::vector<double>& at = pyramid_.levels.front().at;
+    if (values.size() < 2 || at.size() != values.size()) {
+        return;
+    }
+    joinSeam(values.data() + values.size() - 2, at.data() + at.size() - 2, exit_, entry,
+             static_cast<double>(folded_));
+}
+
 LinePyramid PyramidBuilder::finish()
 {
     if (!carry_.empty()) {
@@ -254,6 +277,7 @@ LinePyramid PyramidBuilder::finish()
             bottom.values.insert(bottom.values.end(), carry_.begin(), carry_.end());
         }
         else {
+            joinLastSeam(carry_.front());
             reduceBucketsLocated(carry_.data(), static_cast<long long>(carry_.size()), base_,
                                  folded_, bottom.values, bottom.at);
         }
@@ -306,8 +330,10 @@ LinePyramid pyramidOf(const double* values, long long count, long long base)
             const long long first = from * width;
             const long long take = std::min(to * width, count) - first;
             if (take > 0) {
-                reduceBucketsLocatedInto(values + first, take, width, first, out + from * 2,
-                                         outAt + from * 2);
+                const long long end = first + take;
+                reduceBucketsLocatedInto(
+                    values + first, take, width, first, out + from * 2, outAt + from * 2,
+                    end < count ? values[end] : std::numeric_limits<double>::quiet_NaN());
             }
         });
     }
@@ -399,10 +425,18 @@ namespace {
         out.resize(static_cast<std::size_t>(made) * 2);
         double* into = out.data();
         const double* from = level.values.data() + first;
+        // The element after a piece is its last bucket's seam -- and after the
+        // last piece it is the element after the run, which the run's last
+        // bucket takes in as a read of it would.
+        const auto after = [&](long long end) {
+            return first + end < pyramid.length ? from[end]
+                                                : std::numeric_limits<double>::quiet_NaN();
+        };
         if (positions == nullptr) {
             overRanges(made, take, [&](long long a, long long b) {
                 const long long at = a * bucket;
-                reduceBucketsInto(from + at, std::min(b * bucket, take) - at, bucket, into + a * 2);
+                const long long end = std::min(b * bucket, take);
+                reduceBucketsInto(from + at, end - at, bucket, into + a * 2, after(end));
             });
             return true;
         }
@@ -413,8 +447,9 @@ namespace {
         double* where = positions->data();
         overRanges(made, take, [&](long long a, long long b) {
             const long long at = a * bucket;
-            reduceBucketsLocatedInto(from + at, std::min(b * bucket, take) - at, bucket, first + at,
-                                     into + a * 2, where + a * 2);
+            const long long end = std::min(b * bucket, take);
+            reduceBucketsLocatedInto(from + at, end - at, bucket, first + at, into + a * 2,
+                                     where + a * 2, after(end));
         });
         return true;
     }
@@ -543,6 +578,10 @@ Extremes extremesOver(const LinePyramid& pyramid, long long first, long long las
     };
 
     long long at = first;
+    // Whether the piece the walk ended on was an element rather than a pair. A
+    // pair carries the seam out of it; an element has none, and the run's own
+    // seam is then joined at the end.
+    bool endedOnElement = false;
     while (at < last) {
         // The coarsest level whose bucket starts here and ends inside the run
         // -- or at the end of the line, which a run reaching it is allowed to
@@ -557,6 +596,7 @@ Extremes extremesOver(const LinePyramid& pyramid, long long first, long long las
         }
         const PyramidLevel& level = pyramid.levels[use];
         const long long index = at / level.bucket;
+        endedOnElement = level.bucket == 1;
         if (level.bucket == 1) {
             take(level.values[static_cast<std::size_t>(index)], at, Slot{});
         }
@@ -581,6 +621,11 @@ Extremes extremesOver(const LinePyramid& pyramid, long long first, long long las
     if (highSlot.bucket >= 0) {
         found.highAt = element(highSlot);
     }
+    if (endedOnElement && last < pyramid.length) {
+        const std::vector<double>& raw = pyramid.levels.front().values;
+        joinSeam(found, raw[static_cast<std::size_t>(last - 1)],
+                 raw[static_cast<std::size_t>(last)], last);
+    }
     return found;
 }
 
@@ -602,6 +647,12 @@ void foldColumns(const LinePyramid& pyramid, std::span<const double> edges, Colu
     // what keeps an element out of two columns once the ends are rounded to
     // the base.
     long long cursor = 0;
+    // Whether the last column was drawn as its elements. A folded column takes
+    // its seam into its extremes; one drawn as its elements has none to take
+    // it into, so the column after it opens with its own first element -- the
+    // seam the column before would have taken -- and the stroke between them
+    // is the line's.
+    bool afterElements = false;
     for (std::size_t c = 0; c + 1 < edges.size(); ++c) {
         const double from = edges[c];
         const double to = edges[c + 1];
@@ -626,15 +677,25 @@ void foldColumns(const LinePyramid& pyramid, std::span<const double> edges, Colu
                 out.values.push_back(bottom.values[static_cast<std::size_t>(i)]);
                 out.positions.push_back(static_cast<double>(i));
             }
+            afterElements = true;
             continue;
         }
 
         out.summarised = true;
         const Extremes found = extremesOver(pyramid, first, last);
+        const bool opened = afterElements;
+        afterElements = false;
         if (!found.found()) {
             out.values.push_back(std::numeric_limits<double>::quiet_NaN());
             out.positions.push_back(static_cast<double>(first));
             continue;
+        }
+        const double entry = bottom.values[static_cast<std::size_t>(first)];
+        if (opened && found.firstAt() != first && std::isfinite(entry) &&
+            out.positions.back() == static_cast<double>(first - 1) &&
+            std::isfinite(out.values.back())) {
+            out.values.push_back(entry);
+            out.positions.push_back(static_cast<double>(first));
         }
         out.values.push_back(found.first());
         out.positions.push_back(static_cast<double>(found.firstAt()));

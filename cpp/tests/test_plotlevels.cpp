@@ -98,6 +98,92 @@ TEST_CASE("a bucket answers with its two extremes in the order they occurred", "
     }
 }
 
+TEST_CASE("a bucket takes in the stroke out of it, up to the next bucket's first element",
+          "[levels][seam]")
+{
+    // The picture jonassattler/H5Scope#30 drew, as values: two buckets of
+    // three, the first leaving at 200 and the second entering at 502, which is
+    // neither of the second's extremes. Folded out of their own elements, the
+    // first bucket's pair was (145, 305) and the stroke ran from 305 straight
+    // to the second's 170 -- a segment between two extremes the line never
+    // joined, with the first column drawn short of the 502 the line climbs to
+    // inside it.
+    const std::vector<double> line{145.0, 305.0, 200.0, 502.0, 170.0, 715.0};
+    std::vector<double> values;
+    std::vector<double> positions;
+    plotcore::reduceBucketsLocated(line.data(), 6, 3, 0, values, positions);
+
+    REQUIRE(values.size() == 4);
+    // The first bucket takes the second's first element, where it is...
+    CHECK(values[0] == 145.0);
+    CHECK(positions[0] == 0.0);
+    CHECK(values[1] == 502.0);
+    CHECK(positions[1] == 3.0);
+    // ...and the second, with nothing after it, is its elements alone. So the
+    // stroke is 145, 502, 170, 715: from 502 on, the line's own.
+    CHECK(values[2] == 170.0);
+    CHECK(positions[2] == 4.0);
+    CHECK(values[3] == 715.0);
+    CHECK(positions[3] == 5.0);
+
+    SECTION("a chord through a NaN is not a stroke, on either side of the edge")
+    {
+        for (const std::size_t gap : {std::size_t{2}, std::size_t{3}}) {
+            std::vector<double> holed = line;
+            holed[gap] = kNaN;
+            std::vector<double> out;
+            plotcore::reduceBuckets(holed.data(), 6, 3, out);
+            INFO("NaN at " << gap);
+            CHECK(out[0] == 145.0);
+            CHECK(out[1] == 305.0);
+        }
+    }
+
+    SECTION("the last bucket's seam is the element after the buffer, when it was read")
+    {
+        std::vector<double> out;
+        plotcore::reduceBuckets(line.data(), 3, 3, out, line[3]);
+        CHECK(out == std::vector<double>{145.0, 502.0});
+        out.clear();
+        plotcore::reduceBuckets(line.data(), 3, 3, out); // not read: the elements alone
+        CHECK(out == std::vector<double>{145.0, 305.0});
+    }
+
+    SECTION("a bucket folded before its seam arrived joins it when it does")
+    {
+        // What a fold that arrives in reads does at every read's end.
+        std::vector<double> early;
+        std::vector<double> earlyAt;
+        plotcore::reduceBucketsLocated(line.data(), 3, 3, 0, early, earlyAt);
+        plotcore::joinSeam(early.data(), earlyAt.data(), line[2], line[3], 3.0);
+        CHECK(early == std::vector<double>{values[0], values[1]});
+        CHECK(earlyAt == std::vector<double>{positions[0], positions[1]});
+
+        // Without positions, occurrence order says the same: the entry is
+        // later than both, and falling below the low it becomes the second.
+        std::vector<double> pair{305.0, 145.0};
+        plotcore::joinSeam(pair.data(), nullptr, 145.0, 100.0, 0.0);
+        CHECK(pair == std::vector<double>{305.0, 100.0});
+    }
+
+    SECTION("coarsening carries the seams up, and takes none of its own")
+    {
+        // The third bucket's earlier extreme is -50, deep inside it; its first
+        // element is 5. A coarsen that seamed would join the first coarse
+        // bucket to -50, which is not where the line goes next.
+        const std::vector<double> walk{0.0, 1.0,   2.0, 3.0, 10.0, 4.0,
+                                       5.0, -50.0, 6.0, 7.0, 8.0,  9.0};
+        std::vector<double> fine;
+        plotcore::reduceBuckets(walk.data(), 12, 3, fine);
+        std::vector<double> coarsened;
+        plotcore::coarsenEnvelope(fine.data(), 4, 2, coarsened);
+        std::vector<double> read;
+        plotcore::reduceBuckets(walk.data(), 12, 6, read);
+        CHECK(read == std::vector<double>{0.0, 10.0, -50.0, 9.0});
+        CHECK(coarsened == read);
+    }
+}
+
 TEST_CASE("a read of up to kReadRun never stops inside a bucket", "[levels]")
 {
     // "An envelope reads every element exactly once" is a count test_cost holds
@@ -422,18 +508,35 @@ std::vector<double> testLine(long long count)
     return line;
 }
 
-/// What a read of `[first, first + span)` at `bucket` would have answered.
+/// What a read of `[first, first + span)` at `bucket` would have answered --
+/// the element after it included, where there is one, because that is the
+/// seam of its last bucket.
 std::vector<double> readWould(const std::vector<double>& line, long long first, long long span,
                               long long bucket)
 {
-    const long long take = std::min(span, static_cast<long long>(line.size()) - first);
+    const auto length = static_cast<long long>(line.size());
+    const long long take = std::min(span, length - first);
     std::vector<double> want;
     if (bucket == 1) {
         want.assign(line.begin() + first, line.begin() + first + take);
         return want;
     }
-    plotcore::reduceBuckets(line.data() + first, take, bucket, want);
+    plotcore::reduceBuckets(line.data() + first, take, bucket, want,
+                            first + take < length ? line[static_cast<std::size_t>(first + take)]
+                                                  : kNaN);
     return want;
+}
+
+/// The extremes of `line[from, to)` and of the stroke out of it, as every fold
+/// takes them: extremesOf() and the seam.
+plotcore::Extremes seamedExtremes(const std::vector<double>& line, long long from, long long to)
+{
+    plotcore::Extremes found = plotcore::extremesOf(line.data(), from, to);
+    if (to > from && to < static_cast<long long>(line.size())) {
+        plotcore::joinSeam(found, line[static_cast<std::size_t>(to - 1)],
+                           line[static_cast<std::size_t>(to)], to);
+    }
+    return found;
 }
 
 /// Equal, counting NaN as equal to NaN -- a gap is a value here.
@@ -623,9 +726,10 @@ std::vector<std::vector<double>> placementLines()
 }
 
 /// Every value at its position is that element of `line`, every position is
-/// inside the bucket it was folded out of, and they ascend. `first` and
-/// `bucket` describe the run. Over any base: a coarse one was folded out of the
-/// elements while they were in hand, and kept where each extreme was.
+/// inside the bucket it was folded out of or is its seam -- the first element
+/// of the bucket after it -- and they ascend. `first` and `bucket` describe the
+/// run. Over any base: a coarse one was folded out of the elements while they
+/// were in hand, and kept where each extreme was.
 void placedOn(const std::vector<double>& line, const std::vector<double>& values,
               const std::vector<double>& positions, long long first, long long bucket)
 {
@@ -639,7 +743,8 @@ void placedOn(const std::vector<double>& line, const std::vector<double>& values
                       << ")");
         REQUIRE(p == std::floor(p));
         REQUIRE(p >= static_cast<double>(from));
-        REQUIRE(p < static_cast<double>(to));
+        REQUIRE(p <= static_cast<double>(to));
+        REQUIRE(p < static_cast<double>(length));
         if (i > 0) {
             REQUIRE(p >= positions[i - 1]);
         }
@@ -744,7 +849,7 @@ TEST_CASE("an envelope names the element each extreme is, and holds nothing else
             for (long long from = 0; from < length; from += 997) {
                 for (const long long width : {3LL, 70LL, 1500LL, 9000LL}) {
                     const long long to = std::min(from + width, length);
-                    const plotcore::Extremes want = plotcore::extremesOf(line.data(), from, to);
+                    const plotcore::Extremes want = seamedExtremes(line, from, to);
                     const plotcore::Extremes got = plotcore::extremesOver(pyramid, from, to);
                     INFO("line of " << length << " run " << from << ".." << to);
                     REQUIRE(got.found() == want.found());
@@ -949,7 +1054,7 @@ TEST_CASE("any run's extremes come out of the pyramid as the elements' own",
             for (const long long take : {1LL, 2LL, 3LL, 17LL, 400LL, 4097LL, 9999LL}) {
                 const long long last = std::min(first + take, count);
                 INFO("run " << first << ".." << last);
-                const plotcore::Extremes want = plotcore::extremesOf(line.data(), first, last);
+                const plotcore::Extremes want = seamedExtremes(line, first, last);
                 const plotcore::Extremes got = plotcore::extremesOver(pyramid, first, last);
                 REQUIRE(got.found() == want.found());
                 if (!want.found()) {
@@ -974,7 +1079,7 @@ TEST_CASE("any run's extremes come out of the pyramid as the elements' own",
                 const long long from = (first / 8) * 8;
                 const long long to = std::min(((last + 7) / 8) * 8, count);
                 INFO("run " << first << ".." << last << " rounded to " << from << ".." << to);
-                const plotcore::Extremes want = plotcore::extremesOf(line.data(), from, to);
+                const plotcore::Extremes want = seamedExtremes(line, from, to);
                 const plotcore::Extremes got = plotcore::extremesOver(pyramid, first, last);
                 REQUIRE(got.found() == want.found());
                 if (want.found()) {
@@ -1075,11 +1180,13 @@ TEST_CASE("a logarithmic pane is folded one envelope per column, from the first 
         }
     }
 
-    SECTION("each point is a value its own column holds")
+    SECTION("each point is a value its own column holds, or its seam")
     {
-        // An envelope pair is the extremes of the elements between two edges.
+        // An envelope pair is the extremes of the elements between two edges
+        // and of the stroke out of them, to the next column's first element.
         // Walk the edges and check each column against the elements themselves.
         std::size_t at = 0;
+        bool afterElements = false;
         for (std::size_t c = 0; c + 1 < edges.size() && at < fold.positions.size(); ++c) {
             const auto first = static_cast<long long>(std::ceil(std::max(edges[c], 0.0)));
             const auto last = static_cast<long long>(
@@ -1087,15 +1194,24 @@ TEST_CASE("a logarithmic pane is folded one envelope per column, from the first 
             if (last <= first) {
                 continue;
             }
-            const plotcore::Extremes want = plotcore::extremesOf(line.data(), first, last);
+            const plotcore::Extremes want = seamedExtremes(line, first, last);
             INFO("column " << c << " elements " << first << ".." << last);
             if (last - first <= 2) {
                 for (long long i = first; i < last; ++i, ++at) {
                     REQUIRE(fold.positions[at] == static_cast<double>(i));
                     REQUIRE(fold.values[at] == line[static_cast<std::size_t>(i)]);
                 }
+                afterElements = true;
                 continue;
             }
+            // A folded column after a column of elements opens with its own
+            // first element: the seam the column before had nowhere to put.
+            if (afterElements && want.firstAt() != first) {
+                REQUIRE(fold.positions[at] == static_cast<double>(first));
+                REQUIRE(fold.values[at] == line[static_cast<std::size_t>(first)]);
+                ++at;
+            }
+            afterElements = false;
             REQUIRE(at + 1 < fold.values.size());
             // Each at the element it is, and that element's value -- not at the
             // column's first element and half way along it.

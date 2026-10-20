@@ -205,6 +205,52 @@ TEST_CASE("a line over its budget is held coarser, and only a reader reaches bel
     requireElements(closer, values);
 }
 
+TEST_CASE("a closer read below the base takes the element after it, for its last bucket's seam",
+          "[plot][seam]")
+{
+    // A run folded out of the pyramid has the seam of its last bucket, the
+    // element after the run; a run read below the base has it only if the read
+    // reaches it. So the read asks for one element more, and the run drawn is
+    // the fold of the elements with that element as its seam.
+    const std::vector<double> values = walk(1 << 20);
+    Plot plot;
+    plot.setBudgetBytes(1 << 20);
+    const int line = plot.addLine(values.data(), static_cast<long long>(values.size()));
+    REQUIRE(plot.baseBucket(line) > 4);
+
+    long long askedFirst = -1;
+    long long askedCount = 0;
+    plot.setLineReader(line, [&](long long first, long long count, double* out) {
+        askedFirst = first;
+        askedCount = count;
+        std::copy_n(values.data() + first, count, out);
+        return true;
+    });
+    plot.setPaneColumns(256);
+    // A thousand elements across a run of 512 buckets: a bucket of four, finer
+    // than the base and coarser than the elements.
+    plot.setView(4000.0, 5000.0, false);
+    const PlotLine closer = plot.drawLine(line);
+    REQUIRE(closer.summarised);
+    REQUIRE(closer.positions != nullptr);
+
+    const auto first = static_cast<long long>(closer.positionStart);
+    REQUIRE(askedFirst == first);
+    const long long span = askedCount - 1; // the run, and its seam after it
+    REQUIRE(span == 4 * 512);
+    std::vector<double> want;
+    std::vector<double> wantAt;
+    plotcore::reduceBucketsLocated(values.data() + first, span, 4, first, want, wantAt,
+                                   values[static_cast<std::size_t>(first + span)]);
+    REQUIRE(closer.count == static_cast<long long>(want.size()));
+    for (std::size_t i = 0; i < want.size(); ++i) {
+        INFO("value " << i);
+        REQUIRE(closer.values[i] == want[i]);
+        REQUIRE(closer.positions[i] == wantAt[i]);
+    }
+    requireElements(closer, values);
+}
+
 TEST_CASE("a time base that only goes one way narrows a closer look", "[plot]")
 {
     const std::vector<double> values = walk(100000);

@@ -28,7 +28,11 @@
 //    position and reaches an extremum only by luck;
 //    DatasetTableModel.hpp:205-213 names the cost, "a spike narrower than one
 //    stride is not drawn". An envelope selects the extremum *because* it is
-//    extreme, draws the same number of points, and cannot lose one.
+//    extreme, draws the same number of points, and cannot lose one. Each
+//    bucket takes in the first sample of the next one as well -- its seam, the
+//    stroke out of it, which lies in its own column (see Levels.hpp) -- or the
+//    segment between two columns is a line between two extremes that the data
+//    never drew.
 //
 // 2. Double precision all the way to the vertex. QSGGeometry stores float32.
 //    An x of 1.7e9 -- seconds since the epoch, which is what every logger in
