@@ -2021,6 +2021,44 @@ TEST_CASE("a spike on a bucket's last sample is drawn at that sample", "[plot][p
                          .epsilon(1e-12));
 }
 
+TEST_CASE("the stroke out of a column reaches the next column's first sample", "[plot][seam]")
+{
+    // The renderer's bucket of 128 again. Bucket 299 is flat at zero; bucket
+    // 300 enters at 5, which is neither of its extremes -- it dips to -10 and
+    // then rises to 10. Folded out of its own samples, the flat bucket handed
+    // the stroke straight to the -10, and the 5 the line climbs to across the
+    // edge was drawn nowhere. The edge sits on the 5, so it is the flat
+    // column's to draw. See the seam in Levels.hpp.
+    constexpr std::size_t kEntry = 128 * 300;
+    std::vector<double> values(100000, 0.0);
+    values[kEntry] = 5.0;
+    values[kEntry + 1] = -10.0;
+    values[kEntry + 2] = 10.0;
+    const plotcore::PlotView view = paneOver(0.0, 99999.0, -11.0, 11.0);
+
+    const auto drawsTheEntry = [&](const std::vector<double>& line) {
+        const Projected drawn = project(lineOver(line), plotcore::PlotAxis{}, view);
+        const double x = plotcore::xFractionOf(static_cast<double>(kEntry), view) * view.width;
+        const double y = view.height - plotcore::yFractionOf(5.0, view) * view.height;
+        for (const plotcore::Point& point : drawn.points) {
+            if (point.x() == Approx(x).epsilon(1e-12) && point.y() == Approx(y).epsilon(1e-12)) {
+                return true;
+            }
+        }
+        return false;
+    };
+    CHECK(drawsTheEntry(values));
+
+    SECTION("and does not reach across a gap to it")
+    {
+        // The flat column's last sample missing: there is no stroke between the
+        // two, so neither column has the 5 to draw.
+        std::vector<double> holed = values;
+        holed[kEntry - 1] = kNaN;
+        CHECK_FALSE(drawsTheEntry(holed));
+    }
+}
+
 TEST_CASE("a line that names its positions is still thinned for a narrower pane",
           "[plot][positions]")
 {

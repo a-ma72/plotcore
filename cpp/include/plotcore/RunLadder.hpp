@@ -42,7 +42,12 @@
 //   whatever settle it waits out, one at a time or batched with other groups'
 //   -- and answers when it can (land()). A table reads its group in one
 //   hyperslab; a custom tab reads every entry's run in one crossing of the
-//   thread. Neither is a question of the ladder's.
+//   thread. Neither is a question of the ladder's. What a read folds is the
+//   run *and the element after it*, where the line has one: that element is
+//   the seam of the run's last bucket (see Levels.hpp), and a run folded out of
+//   a pyramid has it, so a read that left it out would draw its last column
+//   short of the same run folded. A read that arrives in pieces joins each
+//   piece's last seam when the next piece lands (joinSeam).
 // - **Free what a renderer may be drawing.** A run given up is handed, vector
 //   by vector, to `Retire`, which is the host's borrow contract: the viewer
 //   keeps them until the next fill hands its renderer something else.

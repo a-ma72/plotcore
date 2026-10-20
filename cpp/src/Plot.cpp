@@ -474,10 +474,16 @@ void Plot::foldCloser(Line& line) const
         }
     }
     else {
-        // Below the base: the reader, for this run and nothing else.
+        // Below the base: the reader, for this run and nothing else -- and the
+        // element after it, where the line has one, because that is the seam
+        // of the run's last bucket (see Levels.hpp). A run drawn sample for
+        // sample has no buckets and needs none.
         const long long take = std::min(want->span, line.length - want->first);
-        std::vector<double> raw(static_cast<std::size_t>(std::max<long long>(take, 0)));
-        if (take <= 0 || !line.reader(want->first, take, raw.data())) {
+        const bool seamed = want->bucket > 1 && want->first + take < line.length;
+        std::vector<double> raw(static_cast<std::size_t>(std::max<long long>(take, 0)) +
+                                (seamed ? 1 : 0));
+        if (take <= 0 ||
+            !line.reader(want->first, static_cast<long long>(raw.size()), raw.data())) {
             line.window.reset();
             return;
         }
@@ -486,7 +492,8 @@ void Plot::foldCloser(Line& line) const
         }
         else {
             reduceBucketsLocated(raw.data(), take, want->bucket, want->first, line.closer,
-                                 line.closerAt);
+                                 line.closerAt,
+                                 seamed ? raw.back() : std::numeric_limits<double>::quiet_NaN());
         }
     }
     line.window = want;

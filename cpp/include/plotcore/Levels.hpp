@@ -32,10 +32,46 @@
 // is the whole shape of gui::LinePyramid -- read at the finest bucket the
 // budget affords, once, and derive every coarser view from it in memory
 // rather than reading the file again.
+//
+// The second is what a bucket is, and it was wrong until jonassattler/
+// H5Scope#30 drew it:
+//
+//   **A bucket is its elements and the stroke out of it.**
+//
+// A fold hands over each bucket's two extremes in the order they occurred, and
+// the stroke joins one bucket's later extreme straight to the next bucket's
+// earlier one. That joining segment is not the line. The line leaves bucket k
+// at its last element and enters bucket k+1 at its first, and a bucket's edge
+// sits *on* that first element -- bucket b is elements [b * size, (b + 1) *
+// size), so the stroke between the two lies wholly in bucket k's column. Folded
+// out of the elements alone, that column was drawn short: a rise one sample
+// past a boundary stood in the next column, and the segment drawn in its place
+// ran from a high of one bucket to a low of the next, across nothing the data
+// had. The rule, as the issue put it: the exit and the entry of two
+// consecutive buckets change the span of the left one, and only that one.
+//
+// So every fold of the elements takes in each bucket's **seam**: the first
+// element of the bucket after it, at its own position, when both it and the
+// bucket's own last element are finite -- a chord through a NaN is a line
+// across a gap, which is the one thing a gap must not be. The seam is still an
+// element, so a value of an envelope is still the element at its position. It
+// is not interpolated at the edge, as a fold over pixel columns with edges
+// between the samples would do (the issue's fold.py): on a logarithmic pane,
+// whose columns do fall between samples, the left column takes the whole chord
+// and its last point stands at that next element, just inside the next column.
+//
+// The first property survives it, and that is why the seam belongs in the
+// fold rather than in the drawing. The seamed extremes of a union are the
+// seamed extremes of its parts: the last part's seam is the union's, and every
+// other part's seam is an element the union holds anyway. So coarsening a
+// seamed envelope is exact -- *provided it adds no seam of its own*, which
+// would join a bucket to the next bucket's earlier extreme rather than to its
+// first element. coarsenEnvelope() below folds pairs plainly for that reason.
 
 #include "plotcore/Projection.hpp"
 
 #include <cstddef>
+#include <limits>
 #include <optional>
 #include <span>
 #include <vector>
@@ -86,6 +122,26 @@ struct Extremes
 /// The extremes of `values[from, to)`, skipping whatever is not finite.
 [[nodiscard]] Extremes extremesOf(const double* values, long long from, long long to);
 
+/// Take a run's seam into `found`: the stroke from `exit`, the run's last
+/// element, to `entry`, the element after it at `entryAt`. See the header.
+///
+/// Both must be finite and the run must have extremes, or there is no stroke
+/// and `found` is left as it is. The entry comes after everything in the run,
+/// so it takes an extreme only by passing it -- an equal value already has an
+/// earlier occurrence, and the first occurrence is the one an envelope names.
+void joinSeam(Extremes& found, double exit, double entry, long long entryAt);
+
+/// The same, for a bucket already folded: `pair` its two values in the order
+/// they occurred and `pairAt`, or null, the element each is.
+///
+/// What a fold that arrives in reads needs. A read ends on a bucket boundary,
+/// so its last bucket's seam is the first element of the *next* read, which is
+/// not in hand until that read lands; the bucket is folded now and its seam
+/// joined then. Occurrence order is enough to do it without positions: the
+/// entry is later than both, so it becomes the second of the pair if it
+/// passes either.
+void joinSeam(double* pair, double* pairAt, double exit, double entry, double entryAt);
+
 /// A read length cut back to a whole number of buckets, so that no read ever
 /// stops inside one.
 ///
@@ -102,8 +158,15 @@ struct Extremes
 /// bucket with nothing finite in it. A bucket of one element yields that
 /// element twice, which is what the renderer expects of a run it can draw
 /// sample for sample.
+///
+/// Each bucket takes in its seam (see the header): the first element of the
+/// bucket after it, which for every bucket but the last is in `values`. The
+/// last one's is `next`, the element after `values[count - 1]` in the line --
+/// NaN where there is none, or where the caller has not read it, and then the
+/// last bucket is its elements alone.
 void reduceBuckets(const double* values, long long count, long long bucket,
-                   std::vector<double>& out);
+                   std::vector<double>& out,
+                   double next = std::numeric_limits<double>::quiet_NaN());
 
 /// The same fold, and the element each value of it is.
 ///
@@ -116,15 +179,21 @@ void reduceBuckets(const double* values, long long count, long long bucket,
 /// A position is always an element, so a value here is always the element at
 /// its position -- there is nothing in between two samples that could be one.
 /// A bucket with nothing finite in it is a pair of NaN at the bucket's start,
-/// which is a gap and is not drawn.
+/// which is a gap and is not drawn. A bucket's seam is an element too, the
+/// first of the next bucket, so a pair's second position can be the next
+/// pair's first: positions ascend, and two of them may be equal.
+///
+/// `next` is reduceBuckets()'s, and it stands at `origin + count`.
 void reduceBucketsLocated(const double* values, long long count, long long bucket, long long origin,
-                          std::vector<double>& out, std::vector<double>& positions);
+                          std::vector<double>& out, std::vector<double>& positions,
+                          double next = std::numeric_limits<double>::quiet_NaN());
 
 /// The same, written straight into `out` and `positions`, for the reason
 /// reduceBucketsInto() is: the pyramid folds slices of a buffer it has sized,
 /// on several threads at once.
 void reduceBucketsLocatedInto(const double* values, long long count, long long bucket,
-                              long long origin, double* out, double* positions);
+                              long long origin, double* out, double* positions,
+                              double next = std::numeric_limits<double>::quiet_NaN());
 
 /// The same fold, written straight into `out`.
 ///
@@ -133,7 +202,8 @@ void reduceBucketsLocatedInto(const double* values, long long count, long long b
 /// already sized -- one level's worth at a time, on several threads at once --
 /// and appending to a vector per piece and copying it into place afterwards was
 /// a second pass over every element of the line at every level of the ladder.
-void reduceBucketsInto(const double* values, long long count, long long bucket, double* out);
+void reduceBucketsInto(const double* values, long long count, long long bucket, double* out,
+                       double next = std::numeric_limits<double>::quiet_NaN());
 
 /// Merge every `factor` buckets of an existing envelope into one, appending
 /// `ceil(buckets / factor)` pairs to `out`.
@@ -150,6 +220,13 @@ void reduceBucketsInto(const double* values, long long count, long long bucket, 
 /// order. Folding it with a bucket of `2 * factor` therefore asks exactly the
 /// question reduceBuckets() asks of the elements -- which is why this is one
 /// line rather than a second implementation to keep in step.
+///
+/// The seams come up with the values, and this adds none. A coarse bucket's
+/// seam is its last part's, already in that part's pair; every other part's
+/// seam is the first element of the part after it, which the union holds
+/// anyway. A seam joined here would be the next *pair's* first value -- the
+/// earlier extreme of the next bucket, which is not where the line goes next.
+/// So the pairs are folded plainly, never through reduceBuckets().
 void coarsenEnvelope(const double* pairs, long long buckets, long long factor,
                      std::vector<double>& out);
 
@@ -391,7 +468,8 @@ struct ZoomFocus
 inline constexpr int kPrefetchOctaves = 2;
 
 /// The finest run in hand that covers what is on screen and can be drawn from,
-/// or -1.
+/// or -1. Of two as fine, the one held last: the one the view as it is now
+/// asked for.
 ///
 /// The whole-line summary covers everything by construction and is what is
 /// drawn when this finds nothing, which is why zooming past the runs held is a

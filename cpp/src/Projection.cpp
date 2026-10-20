@@ -337,14 +337,25 @@ PlotProjected projectLine(const PlotLine& line, const PlotAxis& axis, const Plot
             return;
         }
         const int length = static_cast<int>(points.size()) - open;
-        if (length >= 2) {
+        // ...and so is a run of several stations that are all the same one.
+        // A bucket's seam is the next bucket's first element, which is often
+        // that bucket's first extreme as well, so a fold hands the one element
+        // over twice in a row; between two gaps, that is a run of two stations
+        // and no length. The test stops at the first station that differs, so
+        // a run pays for it at its first two stations and not along its length.
+        const auto onePoint = [&]() {
+            const Point& at = points[static_cast<std::size_t>(open)];
+            return std::all_of(points.begin() + open + 1, points.end(),
+                               [&](const Point& p) { return p.x() == at.x() && p.y() == at.y(); });
+        };
+        if (length >= 2 && !onePoint()) {
             runs.push_back({open, length});
         }
-        else if (length == 1) {
+        else if (length >= 1) {
             // A run of one station is a point, and a stroke needs a direction.
             // Dropping it keeps the counts honest rather than emitting a
             // vertex pair that rasterises to nothing.
-            points.pop_back();
+            points.resize(static_cast<std::size_t>(open));
         }
         open = -1;
     };
@@ -581,6 +592,33 @@ PlotProjected projectLine(const PlotLine& line, const PlotAxis& axis, const Plot
             // The whole bucket is a gap.
             closeRun();
             continue;
+        }
+
+        // The stroke out of the bucket, to the next one's first sample: the
+        // edge sits on that sample, so all of the stroke is in this column,
+        // and without it the column is drawn short and the segment to the next
+        // one runs between two extremes the line never joined. See the seam
+        // in Levels.hpp. Only for a line of samples -- a summary's pairs were
+        // folded with their seams, and the next value of one is the next
+        // bucket's earlier extreme, not its first sample. And only between
+        // two samples the axes can place, for the reason every gap is one.
+        if (!line.summarised && i1 + 1 < count) {
+            const double exit = line.values[i1];
+            const double entry = line.values[i1 + 1];
+            const auto placed = [&](std::int64_t i) {
+                return xMap.draws(line.positions != nullptr ? xOf(line, axis, i)
+                                                            : x0 + static_cast<double>(i) * dx);
+            };
+            if (yMap.draws(exit) && yMap.draws(entry) && placed(i1) && placed(i1 + 1)) {
+                if (entry < lowest) {
+                    lowest = entry;
+                    lowIndex = i1 + 1;
+                }
+                else if (entry > highest) {
+                    highest = entry;
+                    highIndex = i1 + 1;
+                }
+            }
         }
 
         // Each extreme where it is. The scan above kept its index, so this
