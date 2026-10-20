@@ -85,7 +85,7 @@ to PyPI or crates.io.
   Python 3.
 - **Rust:** a git dependency on the release's tag, which builds the C++ itself
   and so needs a C++20 compiler:
-  `cargo add plotcore plotcore-egui --git https://github.com/jonassattler/plotcore --tag v0.2.0`
+  `cargo add plotcore plotcore-egui --git https://github.com/jonassattler/plotcore --tag v0.2.1`
 - **C++ and C:** build the release's source with CMake, as above.
 
 None of the demos needs anything installed. On Linux it is an AppImage: the

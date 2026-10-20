@@ -16,7 +16,7 @@ resolver = "2"
 members = ["plotcore-sys", "plotcore", "plotcore-egui", "egui-demo"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 rust-version = "1.95"
 license = "GPL-3.0-only"
@@ -28,9 +28,9 @@ readme = "README.md"
 # A version beside each path, because a packaged crate names its
 # dependencies by version: the same as [workspace.package]'s, or nothing here
 # builds.
-plotcore-sys = { path = "plotcore-sys", version = "0.2.0" }
-plotcore = { path = "plotcore", version = "0.2.0" }
-plotcore-egui = { path = "plotcore-egui", version = "0.2.0" }
+plotcore-sys = { path = "plotcore-sys", version = "0.2.1" }
+plotcore = { path = "plotcore", version = "0.2.1" }
+plotcore-egui = { path = "plotcore-egui", version = "0.2.1" }
 egui = { version = "0.37", default-features = false, features = ["default_fonts"] }
 eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
 
