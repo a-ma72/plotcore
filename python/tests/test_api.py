@@ -26,7 +26,7 @@ def figure_of(*lines, width=800, height=500):
 
 def test_the_library_is_the_one_this_package_speaks_to():
     assert plotcore.abi_version() == 2
-    assert plotcore.version() == "0.2.0"
+    assert plotcore.version() == "0.2.1"
     assert plotcore.palette_names() == ["okabe-ito", "tol bright", "tol muted", "spectrum", "safe"]
     assert plotcore.ramp_names()[1] == "viridis"
     okabe = plotcore.palette("okabe-ito")

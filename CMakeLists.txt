@@ -22,7 +22,7 @@
 # installed.
 
 cmake_minimum_required(VERSION 3.26)
-project(plotcore VERSION 0.2.0 LANGUAGES CXX)
+project(plotcore VERSION 0.2.1 LANGUAGES CXX)
 
 include(GNUInstallDirs)
 
