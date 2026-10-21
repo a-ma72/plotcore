@@ -103,6 +103,7 @@ CI builds the same on every commit and uploads it to the run as artefacts:
 | The Qt demo | `plotcore-qt-demo-Linux` | `plotcore-qt-demo-Windows` |
 | The egui demo | `plotcore-egui-demo-Linux` | `plotcore-egui-demo-Windows` |
 | The PyQt6 demo | `plotcore-pyqt6-demo-Linux` | `plotcore-pyqt6-demo-Windows` |
+| The source of the AppImages' system libraries | `plotcore-appimage-sources` | |
 
 A tag `v<version>` is a release: `.github/workflows/release.yml` runs CI at
 that commit, then publishes what it built on the releases page. The version
@@ -114,7 +115,12 @@ and the tag has to name it.
 BSD-3-Clause. See [LICENSE](LICENSE). Releases up to 0.2.1 were
 GPL-3.0-only.
 
-The Qt and PyQt6 demos carry Qt, which they convey under the LGPL-3.0, and
-the PyQt6 demo carries PyQt6, which is GPL-3.0 alone, so that demo's
-packages are distributed under the GPL-3.0 as a whole. Each carries those
-licences beside plotcore's.
+Each demo carries, beside plotcore's licence, a `licenses` folder with the
+licences of everything else in it: the Rust crates the egui demo is built
+from, the Python and the distributions the PyQt6 demo runs on, the
+third-party code Qt builds in, and the libraries an AppImage takes from
+AlmaLinux. `packaging/notices.py` writes it, and CI fails a package it does
+not cover. The Qt and PyQt6 demos carry Qt, which they convey under the
+LGPL-3.0, and the PyQt6 demo carries PyQt6, which is GPL-3.0 alone, so that
+demo's packages are distributed under the GPL-3.0 as a whole. A release
+publishes the source of the AppImages' AlmaLinux libraries beside them.

@@ -207,23 +207,59 @@ desktop_and_icon() {
         "$appdir/usr/share/icons/hicolor/scalable/apps/plotcore.svg"
     install -m 644 "$appimage_packaging/plotcore.png" "$appdir/plotcore.png"
     cp "$appimage_packaging/plotcore.png" "$appdir/.DirIcon"
-    # Each image is plotcore in binary form, so it carries the licence (its
-    # second condition).
+}
+
+# --- licences --------------------------------------------------------------
+# Each image is plotcore in binary form, so it carries plotcore's licence
+# (its second condition), and everything else in it carries its own, in the
+# folder below: the sections packaging/notices.py writes, one per kind of
+# thing an image takes from elsewhere, and a README that says which is which.
+# notices.py runs under whichever Python the build has; in-container.sh names
+# manylinux's.
+readonly licences_dir="usr/share/doc/plotcore/licenses"
+
+notices() {
+    "${PLOTCORE_PYTHON:-python3}" "$appimage_packaging/notices.py" "$@"
+}
+
+# licences <appdir>
+licences() {
+    local appdir="$1"
     install -Dm 644 "$appimage_root/LICENSE" "$appdir/usr/share/doc/plotcore/LICENSE"
+    install -Dm 644 -t "$appdir/$licences_dir" "$appimage_packaging/licenses/README.md"
 }
 
 # qt_licences <appdir>
 #
 # Qt is conveyed under the LGPL-3.0, which asks for its own text and the
 # GPL-3.0's beside the work it is part of (section 4), and PyQt6 under the
-# GPL-3.0 alone. plotcore's licence says nothing of either, so an image
-# carrying Qt carries both texts, and a word on which is whose.
+# GPL-3.0 alone, so an image carrying Qt carries both texts. What Qt builds
+# in is its Qt section's.
 qt_licences() {
     local appdir="$1"
-    install -Dm 644 -t "$appdir/usr/share/doc/plotcore/licenses" \
-        "$appimage_packaging/licenses/README.md" \
+    install -Dm 644 -t "$appdir/$licences_dir" \
         "$appimage_packaging/licenses/LGPL-3.0.txt" \
         "$appimage_packaging/licenses/GPL-3.0.txt"
+}
+
+# system_notices <appdir> <output-dir> <version>
+#
+# The section for every library in usr/lib that is the build machine's --
+# that is, not Qt's, which the Qt section covers -- and the record that
+# in-container.sh downloads their source by, for the release to publish
+# beside the images under the name the section gives it.
+system_notices() {
+    local appdir="$1" outdir="$2" version="$3" path
+    local -a libraries=()
+    for path in "$appdir"/usr/lib/*.so*; do
+        [ -e "$path" ] || continue
+        case "$(basename "$path")" in libQt6* | libicu*) continue ;; esac
+        libraries+=("$path")
+    done
+    mkdir -p "$outdir"
+    notices system "$appdir/$licences_dir" "${libraries[@]}" \
+        --record "$outdir/system-packages.txt" \
+        --sources "plotcore-$version-appimage-sources.tar"
 }
 
 # pack <appdir> <output>

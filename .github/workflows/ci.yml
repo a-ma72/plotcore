@@ -346,6 +346,14 @@ jobs:
           path: dist/plotcore-pyqt6-demo-*.AppImage
           if-no-files-found: error
 
+      # The source RPMs of the libraries the images took from AlmaLinux and
+      # EPEL, which a release publishes beside them (in-container.sh).
+      - uses: actions/upload-artifact@v7
+        with:
+          name: plotcore-appimage-sources
+          path: dist/plotcore-*-appimage-sources.tar
+          if-no-files-found: error
+
   # The three demos for Windows, each a folder that starts on a Windows with
   # nothing installed, built by packaging/windows -- the Qt one beside the Qt
   # it was built on, the egui one alone, the PyQt6 one frozen around the wheel

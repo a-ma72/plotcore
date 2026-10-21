@@ -39,19 +39,32 @@ function Copy-VCRuntime([string] $Out) {
     Copy-Item "$crt/*.dll" $Out
 }
 
-# Qt is conveyed under the LGPL-3.0, which asks for its own text and the
-# GPL-3.0's beside the work it is part of (section 4), and PyQt6 under the
-# GPL-3.0 alone. plotcore's licence says nothing of either, so a bundle
-# carrying Qt carries both texts, and a word on which is whose.
-function Copy-QtLicences([string] $Out) {
-    $licences = New-Item -ItemType Directory -Force (Join-Path $Out 'licenses')
-    Copy-Item "$root/packaging/licenses/*" $licences
+# A Visual C++ runtime DLL, by name: those above, and the copies of them a
+# wheel carries. Microsoft's, redistributed on Microsoft's terms, and so in
+# no licences section.
+$runtimeDll = '^(vcruntime|msvcp|concrt|vccorlib|vcomp)[^\\/]*\.dll$'
+
+# Each bundle is plotcore in binary form, so it carries plotcore's licence
+# (its second condition), and everything else in it carries its own, in
+# licenses/: the sections packaging/notices.py writes, one per kind of thing
+# a bundle takes from elsewhere, and a README that says which is which.
+function Invoke-Notices {
+    & python "$root/packaging/notices.py" @args
 }
 
-# Each bundle is plotcore in binary form, so it carries the licence (its
-# second condition).
+# Qt is conveyed under the LGPL-3.0, which asks for its own text and the
+# GPL-3.0's beside the work it is part of (section 4), and PyQt6 under the
+# GPL-3.0 alone, so a bundle carrying Qt carries both texts. What Qt builds
+# in is its Qt section's.
+function Copy-QtLicences([string] $Out) {
+    $licences = New-Item -ItemType Directory -Force (Join-Path $Out 'licenses')
+    Copy-Item "$root/packaging/licenses/LGPL-3.0.txt", "$root/packaging/licenses/GPL-3.0.txt" $licences
+}
+
 function Complete-Bundle([string] $Out) {
     Copy-Item "$root/LICENSE" $Out
+    $licences = New-Item -ItemType Directory -Force (Join-Path $Out 'licenses')
+    Copy-Item "$root/packaging/licenses/README.md" $licences
     $files = @(Get-ChildItem $Out -Recurse -File)
     $size = ($files | Measure-Object Length -Sum).Sum / 1MB
     Write-Host ('wrote {0} ({1:N0} MB in {2} files)' -f $Out, $size, $files.Count)

@@ -56,15 +56,12 @@ test -n "$desktop"
 grep -q '^Icon=plotcore$' "$desktop"
 test -f "$root/plotcore.png"
 test -f "$root/.DirIcon"
-test -f "$root/usr/share/doc/plotcore/LICENSE"
-echo "$(basename "$desktop"), its icon and the licence are there"
+echo "$(basename "$desktop") and its icon are there"
 
-# plotcore's licence says nothing of Qt's, and an image that carries Qt
-# conveys it under the LGPL-3.0 (and PyQt6 under the GPL-3.0).
-if [ -n "$(find "$root" -name 'libQt6Core.so*' -print -quit)" ]; then
-    echo "-- the licences of the Qt it carries"
-    for text in README.md LGPL-3.0.txt GPL-3.0.txt; do
-        test -f "$root/usr/share/doc/plotcore/licenses/$text"
-    done
-    echo "it carries Qt, and the LGPL-3.0 and GPL-3.0 are there"
-fi
+# plotcore's licence, and the licences of everything else in the image:
+# notices.py reads the image back against the folder it wrote, so a library
+# that ever comes to be bundled without its notice fails here.
+echo "-- the licences of what it carries"
+test -f "$root/usr/share/doc/plotcore/LICENSE"
+"${PLOTCORE_PYTHON:-python3}" "$here/../notices.py" check "$root" \
+    "$root/usr/share/doc/plotcore/licenses"

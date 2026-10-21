@@ -30,4 +30,5 @@ try {
 
 $out = New-Bundle 'plotcore-egui-demo' $OutDir
 Copy-Item "$root/rust/target/release/egui-demo.exe" "$out/plotcore-egui-demo.exe"
+Invoke-Notices rust (Join-Path $out 'licenses') "$root/rust" egui-demo x86_64-pc-windows-msvc
 Complete-Bundle $out

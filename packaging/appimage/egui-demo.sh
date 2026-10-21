@@ -45,4 +45,7 @@ chmod 755 "$appdir/AppRun"
 
 bundle_needed "$appdir/usr/lib" "$appdir/usr/bin/plotcore-egui-demo"
 desktop_and_icon "$appdir" "$appimage_packaging/appimage/plotcore-egui-demo.desktop"
+licences "$appdir"
+notices rust "$appdir/$licences_dir" "$appimage_root/rust" egui-demo x86_64-unknown-linux-gnu
+system_notices "$appdir" "$outdir" "$version"
 pack "$appdir" "$outdir/plotcore-egui-demo-$version-x86_64.AppImage"

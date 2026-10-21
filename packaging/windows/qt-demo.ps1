@@ -41,4 +41,9 @@ Copy-Item "$build/cpp/qt-demo/Release/plotcore-qt-demo.exe" $out
 Copy-Item "$qt/plugins/platforms/qoffscreen.dll" "$out/platforms/"
 Copy-VCRuntime $out
 Copy-QtLicences $out
+# Qt's notices from the SBOMs it installs beside itself, for what windeployqt
+# took of it: every DLL in the bundle but the C++ runtime's.
+$binaries = Get-ChildItem $out -Recurse -Filter *.dll |
+    Where-Object { $_.Name -notmatch $runtimeDll } | ForEach-Object FullName
+Invoke-Notices qt (Join-Path $out 'licenses') "$qt/sbom" @binaries
 Complete-Bundle $out

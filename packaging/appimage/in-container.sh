@@ -24,18 +24,23 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # EPEL for xcb-util-cursor: Qt 6.5 and newer link the xcb plugin against it,
 # RHEL 8 has it nowhere else, and so it is the one library both Qt images
-# exist to carry.
+# exist to carry. The last line is for the images' licences: zstd to read
+# python-build-standalone's, and dnf download and cpio for the source RPMs
+# and for licence files that tsflags=nodocs left out (see notices.py).
 dnf install -y -q epel-release
 dnf install -y -q --setopt=install_weak_deps=False \
     mesa-libGL-devel mesa-libEGL-devel libxkbcommon-devel libxkbcommon-x11 \
     fontconfig-devel freetype-devel dbus-libs glib2 \
     libxcb libxcb-devel xcb-util xcb-util-cursor xcb-util-image xcb-util-keysyms \
     xcb-util-renderutil xcb-util-wm \
-    wayland-devel libX11-devel libXcursor-devel libXrandr-devel libXi-devel
+    wayland-devel libX11-devel libXcursor-devel libXrandr-devel libXi-devel \
+    zstd cpio dnf-plugins-core
 
 # Qt 6.8, the last whose Linux binaries need no more than glibc 2.28 (see
 # qt-demo.sh), through the same tool install-qt-action uses on the runners.
 python=/opt/python/cp312-cp312/bin/python
+# What notices.py runs under; AlmaLinux 8's own python3 is 3.6.
+export PLOTCORE_PYTHON="$python"
 "$python" -m pip install -q aqtinstall==3.3.0
 "$python" -m aqt install-qt linux desktop 6.8.3 linux_gcc_64 -O /opt/qt >/dev/null
 
@@ -56,6 +61,17 @@ bash "$here/pyqt6-demo.sh" "$wheel" "$outdir"
 for image in "$outdir"/*.AppImage; do
     bash "$here/verify.sh" "$image"
 done
+
+# The source of every library the images took from AlmaLinux and EPEL, as
+# the source RPM of the exact build each carries: the LGPL and the GPL ask
+# for it to be offered from where the binaries are, so the release publishes
+# it beside them, under the name the images' system sections give it.
+version="$(sed -n 's/^project(plotcore VERSION \([0-9.]*\).*/\1/p' "$here/../../CMakeLists.txt")"
+sources="$(mktemp -d)"
+sort -u "$outdir/system-packages.txt" | xargs dnf download -q --source --destdir "$sources"
+tar -cf "$outdir/plotcore-$version-appimage-sources.tar" -C "$sources" .
+echo "wrote plotcore-$version-appimage-sources.tar: $(find "$sources" -name '*.src.rpm' | wc -l) source RPMs"
+rm -rf "$sources" "$outdir/system-packages.txt"
 
 # Written as root into a directory the runner's user has to upload from.
 chmod -R a+rwX "$outdir"
