@@ -1,0 +1,15 @@
+Qt6Core.dll
+Qt6Gui.dll
+Qt6Network.dll
+Qt6Svg.dll
+Qt6Widgets.dll
+qgif.dll
+qico.dll
+qjpeg.dll
+qminimal.dll
+qmodernwindowsstyle.dll
+qoffscreen.dll
+qsvg.dll
+qsvgicon.dll
+qtuiotouchplugin.dll
+qwindows.dll

@@ -3,7 +3,8 @@
 The plot H5Scope draws, as a library: C++20 with no dependencies, a C
 interface over it, and Python and Rust libraries over that. One directory per
 language, each holding its library, its tests and a demo that walks every
-feature. GPL-3.0-only.
+feature. BSD-3-Clause; up to 0.2.1 it was GPL-3.0-only, and both copyright
+holders agreed to the change.
 
 "The viewer" everywhere in this repository is
 [H5Scope](https://github.com/jonassattler/H5Scope), which pins this repository
@@ -39,7 +40,8 @@ ctest --test-dir build --output-on-failure
   AppImage each and `verify.sh` checks one. They run anywhere, but only hold
   the RHEL 8 floor when run inside manylinux_2_28, which is what
   `in-container.sh` is for. Off a floor-sized machine, `verify.sh` fails on the
-  floor and nothing else. `packaging/windows/{qt,egui,pyqt6}-demo.ps1` build
+  floor and nothing else; the system libraries' notices need `rpm` or `dpkg`
+  to say whose a library is. `packaging/windows/{qt,egui,pyqt6}-demo.ps1` build
   one Windows folder each and `verify.ps1` checks one; they need Windows.
 
 CI is `.github/workflows/ci.yml`: C++ and C, the Qt widget, Python and Rust,
@@ -51,8 +53,8 @@ it publishes nothing.
 
 A tag `v<version>` is a release, and `.github/workflows/release.yml` is all of
 it: it runs `ci.yml` at the tagged commit, then publishes what that built as a
-GitHub release — the demos (the Windows folders zipped) and both wheels, with
-a `SHA256SUMS`. **Nothing goes to PyPI or crates.io**, and nothing should
+GitHub release — the demos (the Windows folders zipped), both wheels and the
+source RPMs of the AppImages' system libraries, with a `SHA256SUMS`. **Nothing goes to PyPI or crates.io**, and nothing should
 without the user asking for it: a version uploaded there cannot be taken
 back.
 
@@ -101,7 +103,7 @@ each define their own targets.
 | `python/` | The package (`src/plotcore`: `_native.py`, `figure.py`, `scene.py`, `qt.py`, `mpl.py`), its tests, and `pyqt6-demo/` with the demo's pinned `requirements.txt`. |
 | `rust/` | `plotcore-sys`, `plotcore`, `plotcore-egui`, `egui-demo`, and `README.md`, which each crate also names as its own. |
 | `golden/` | The script the C, Python and Rust tests all run, and its digest. |
-| `packaging/` | The icon; `appimage/`, the demos for Linux; `windows/`, the demos for Windows. |
+| `packaging/` | The icon; `appimage/`, the demos for Linux; `windows/`, the demos for Windows; `notices.py` and `licenses/`, the licences of what each demo carries beside plotcore. |
 
 ## plotcore and H5Scope
 
@@ -272,11 +274,46 @@ the folder with `dumpbin` and fails on a runtime DLL the folder does not
 carry, before it runs the self-test with Qt, Python and the toolchains off
 the `PATH`.
 
+## The demos' licences
+
+Every package carries plotcore's `LICENSE` and a `licenses/` folder with the
+licences of everything else in it, which `packaging/notices.py` writes, one
+section per kind of thing: `rust` (the crates `cargo tree` says the egui demo
+links, and the standard library), `python` (every distribution beside the
+interpreter, run under that interpreter), `qt` (the third-party code Qt builds
+in, from the SBOMs Qt installs in `sbom/`, cut to the shipped binaries) and
+`system` (an AppImage's AlmaLinux libraries, each under the RPM that installed
+it). `notices.py check` is how `verify.sh` and `verify.ps1` read a package
+back: a Qt binary or a system library its folder does not name fails it.
+
+- **PyQt6's Qt is trimmed** to what the demo loads — QtCore, QtGui,
+  QtWidgets and QtSvg, the platform and image-format plugins of qtbase, qtsvg
+  and qtwayland — on both platforms (`trim_pyqt6` in `pyqt6-demo.sh`, the
+  end of `pyqt6-demo.ps1`). PyQt6-Qt6 is all of Qt, FFmpeg and pdfium
+  included, with only the LGPL text; trimmed, its notices are three Qt
+  repositories' and no FFmpeg source has to be published. It carries no SBOM,
+  so its Qt section is rendered from Qt's own for the same version and kept
+  in `packaging/licenses/pyqt6-qt6/<version>-<platform>/`. **Bumping
+  PyQt6-Qt6** means rendering it again: install that Qt with aqt (`--archives
+  qtbase qtsvg qtwayland`, and `qtbase qtsvg` for Windows) and run
+  `notices.py qt --lean` over its `sbom/` with the binaries the package
+  keeps; the build fails on a version it has no rendering for.
+- **What the sections cannot be written without** is kept under
+  `packaging/licenses/` and listed, with where each came from, at the top of
+  `notices.py`: SPDX texts for the licences Qt's SBOMs name, ICU's licence,
+  and the licence files of projects whose crates ship none. A new crate or
+  Qt licence without one fails the build and says what to add.
+- **The source** of every system library is published with the release:
+  `in-container.sh` downloads the source RPM of each exact build the images
+  carry into `plotcore-<version>-appimage-sources.tar`, which the system
+  sections name. Qt's and PyQt6's sections point at their upstream source for
+  the version carried.
+
 ## Conventions
 
 - SPDX header on every file: `SPDX-FileCopyrightText: 2026 Jonas Sattler` (and
   `2026 Andreas Martin` beside it on files derived from his work in
-  jonassattler/H5Scope#30) and `SPDX-License-Identifier: GPL-3.0-only`.
+  jonassattler/H5Scope#30) and `SPDX-License-Identifier: BSD-3-Clause`.
 - `.clang-format` (LLVM base, 100 columns, 4 spaces) and `.clang-tidy` — match
   them. `cargo fmt` and `rustfmt.toml` for Rust.
 - Doc comments are `///` on the declaration; `//` blocks above a decision

@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2026 Jonas Sattler
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: BSD-3-Clause
 #
 # One plot, driven through every gesture and setting the hosts forward, and
 # written down after each step that changes the picture. The C test, the

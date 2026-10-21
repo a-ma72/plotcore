@@ -1,12 +1,13 @@
 # SPDX-FileCopyrightText: 2026 Jonas Sattler
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: BSD-3-Clause
 
 name: Release
 
 # A tag v<version> is a release of the commit it names. Everything CI does is
 # done again there (ci.yml, called from here), and what that built is
-# published as a GitHub release: the demos for both platforms and the two
-# wheels, with a checksum of each. Its notes are the tag's annotation, in
+# published as a GitHub release: the demos for both platforms, the two
+# wheels and the source the AppImages' system libraries are built from, with
+# a checksum of each. Its notes are the tag's annotation, in
 # Markdown below its subject line, written to a file first so that git's own
 # cleanup does not take the "## " headings for comments:
 #
@@ -51,8 +52,9 @@ jobs:
     uses: ./.github/workflows/ci.yml
 
   # Each demo as one download -- an AppImage as it is, a Windows folder
-  # zipped with the folder in it -- beside the two wheels and a checksum of
-  # every file.
+  # zipped with the folder in it -- beside the two wheels, the source of the
+  # libraries the AppImages take from AlmaLinux, which their licences ask to
+  # be offered from where the images are, and a checksum of every file.
   github:
     name: GitHub release
     needs: ci
@@ -77,6 +79,11 @@ jobs:
           pattern: plotcore-python-*
           path: release
           merge-multiple: true
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: plotcore-appimage-sources
+          path: release
 
       - name: Put it together
         run: |

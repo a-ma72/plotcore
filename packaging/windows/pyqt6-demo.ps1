@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2026 Jonas Sattler
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: BSD-3-Clause
 #
 # The PyQt6 demo for Windows: the wheel CI tested, PyQt6 and matplotlib, and
 # the demo, frozen by PyInstaller into a folder with a windowed executable.
@@ -31,6 +31,7 @@ $pyinstaller = @('pyinstaller==6.22.3', 'pyinstaller-hooks-contrib==2026.8')
 $wheelPath = (Resolve-Path $Wheel).Path
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 $dist = (Resolve-Path $OutDir).Path
+$bundle = Join-Path $dist 'plotcore-pyqt6-demo'
 $demo = "$root/python/pyqt6-demo"
 
 Write-Host "plotcore $version PyQt6 demo -> $OutDir"
@@ -62,8 +63,31 @@ try {
         --workpath "$work/build" `
         --specpath $work `
         "$demo/demo.py"
+    # The Python section is written by the bundle's own Python, before its
+    # environment is removed, which is how it lists what that Python had
+    # installed and nothing of the runner's. PyInstaller and what it needs
+    # are listed too: its runtime hooks are frozen into the program.
+    & $python -I -B "$root/packaging/notices.py" python (Join-Path $bundle 'licenses')
+    $qtVersion = & $python -I -c "import importlib.metadata as m; print(m.version('PyQt6-Qt6'))"
 } finally {
     Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
 }
 
-Complete-Bundle "$dist/plotcore-pyqt6-demo"
+# PyInstaller's hooks take in every image format plugin PyQt6-Qt6 has --
+# Qt PDF's, and with it the whole of Qt PDF and pdfium, and those of
+# qtimageformats, with libtiff and libwebp -- and Mesa's software OpenGL,
+# which is more than the demo loads and more than the AppImage carries. The
+# bundle keeps what the AppImage keeps of Qt (trim_pyqt6 in pyqt6-demo.sh),
+# which is what its Qt section covers; notices.py fails on anything else.
+$qt6 = Join-Path $bundle '_internal/PyQt6/Qt6'
+Remove-Item -Force "$qt6/bin/Qt6Pdf.dll", "$qt6/bin/opengl32sw.dll" -ErrorAction SilentlyContinue
+Get-ChildItem "$qt6/plugins/imageformats" |
+    Where-Object { $_.Name -notin 'qgif.dll', 'qico.dll', 'qjpeg.dll', 'qsvg.dll' } |
+    Remove-Item -Force
+
+Copy-QtLicences $bundle
+$binaries = Get-ChildItem $qt6 -Recurse -Filter *.dll |
+    Where-Object { $_.Name -notmatch $runtimeDll } | ForEach-Object FullName
+Invoke-Notices qt (Join-Path $bundle 'licenses') `
+    "$root/packaging/licenses/pyqt6-qt6/$qtVersion-windows" @binaries
+Complete-Bundle $bundle

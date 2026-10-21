@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Jonas Sattler
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: BSD-3-Clause
 
 //! Compiles plotcore -- the core and its C interface -- into a static library
 //! linked into whatever depends on this crate. No CMake and no libclang: the

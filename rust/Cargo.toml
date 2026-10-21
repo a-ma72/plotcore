@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2026 Jonas Sattler
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: BSD-3-Clause
 
 # plotcore for Rust: the C interface compiled in (plotcore-sys), a safe
 # wrapper over it (plotcore), the same figure in egui (plotcore-egui), and an
@@ -19,7 +19,7 @@ members = ["plotcore-sys", "plotcore", "plotcore-egui", "egui-demo"]
 version = "0.2.1"
 edition = "2021"
 rust-version = "1.95"
-license = "GPL-3.0-only"
+license = "BSD-3-Clause"
 authors = ["Jonas Sattler", "Andreas Martin"]
 repository = "https://github.com/jonassattler/plotcore"
 readme = "README.md"

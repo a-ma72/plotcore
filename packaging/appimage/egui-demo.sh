@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Jonas Sattler
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: BSD-3-Clause
 #
 # The egui demo as an AppImage.
 #
@@ -36,7 +36,7 @@ install -Dm 755 "$binary" "$appdir/usr/bin/plotcore-egui-demo"
 cat > "$appdir/AppRun" <<'EOF'
 #!/bin/sh
 # SPDX-FileCopyrightText: 2026 Jonas Sattler
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: BSD-3-Clause
 APPDIR="$(dirname "$(readlink -f "$0")")"
 export LD_LIBRARY_PATH="$APPDIR/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 exec "$APPDIR/usr/bin/plotcore-egui-demo" "$@"
@@ -45,4 +45,7 @@ chmod 755 "$appdir/AppRun"
 
 bundle_needed "$appdir/usr/lib" "$appdir/usr/bin/plotcore-egui-demo"
 desktop_and_icon "$appdir" "$appimage_packaging/appimage/plotcore-egui-demo.desktop"
+licences "$appdir"
+notices rust "$appdir/$licences_dir" "$appimage_root/rust" egui-demo x86_64-unknown-linux-gnu
+system_notices "$appdir" "$outdir" "$version"
 pack "$appdir" "$outdir/plotcore-egui-demo-$version-x86_64.AppImage"

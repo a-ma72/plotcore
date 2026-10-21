@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Jonas Sattler
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: BSD-3-Clause
 #
 # Prove that every ELF file given will load on the oldest distribution the
 # AppImages are for, without having that distribution to hand. H5Scope's

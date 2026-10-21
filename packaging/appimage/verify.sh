@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Jonas Sattler
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: BSD-3-Clause
 #
 # Everything that has to be true of a demo AppImage. An AppImage that was
 # produced is not one that runs, and the ways it can be built wrong are quiet:
@@ -56,5 +56,12 @@ test -n "$desktop"
 grep -q '^Icon=plotcore$' "$desktop"
 test -f "$root/plotcore.png"
 test -f "$root/.DirIcon"
+echo "$(basename "$desktop") and its icon are there"
+
+# plotcore's licence, and the licences of everything else in the image:
+# notices.py reads the image back against the folder it wrote, so a library
+# that ever comes to be bundled without its notice fails here.
+echo "-- the licences of what it carries"
 test -f "$root/usr/share/doc/plotcore/LICENSE"
-echo "$(basename "$desktop"), its icon and the licence are there"
+"${PLOTCORE_PYTHON:-python3}" "$here/../notices.py" check "$root" \
+    "$root/usr/share/doc/plotcore/licenses"

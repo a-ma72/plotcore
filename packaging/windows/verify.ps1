@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2026 Jonas Sattler
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: BSD-3-Clause
 #
 # Everything that has to be true of a Windows demo bundle, as verify.sh is for
 # an AppImage. A folder that was produced is not one that starts, and the way
@@ -37,7 +37,7 @@ if (-not $dumpbin) {
 # the concrt140.dll its msvcp140.dll delay-loads, which PyInstaller does not
 # follow.
 Write-Host '-- the C++ runtime it needs, it carries'
-$runtime = '^(vcruntime|msvcp|concrt|vccorlib|vcomp)[^\\/]*\.dll$'
+$runtime = $runtimeDll
 $carried = @{}
 Get-ChildItem $bundlePath -Recurse -File -Filter *.dll | ForEach-Object {
     $carried[$_.Name.ToLowerInvariant()] = $true
@@ -60,6 +60,16 @@ if ($missing.Count -gt 0) {
     throw "$name does not carry the C++ runtime it needs"
 }
 Write-Host "read the imports of $read files: every runtime DLL they name is carried"
+
+# plotcore's licence, and the licences of everything else in the bundle:
+# notices.py reads the bundle back against the folder it wrote, so a DLL
+# that ever comes to be carried without its notice fails here. Before the
+# PATH is taken away below, because it runs on the runner's Python.
+Write-Host '-- the licences of what it carries'
+if (-not (Test-Path (Join-Path $bundlePath 'LICENSE') -PathType Leaf)) {
+    throw "$name does not carry plotcore's licence"
+}
+& python "$root/packaging/notices.py" check $bundlePath (Join-Path $bundlePath 'licenses')
 
 # --self-test from the bundle alone: Qt, Python and every toolchain off the
 # PATH, nothing pointing Qt or Python anywhere else, offscreen. Through

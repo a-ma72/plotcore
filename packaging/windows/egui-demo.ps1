@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2026 Jonas Sattler
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: BSD-3-Clause
 #
 # The egui demo for Windows: one executable.
 #
@@ -30,4 +30,5 @@ try {
 
 $out = New-Bundle 'plotcore-egui-demo' $OutDir
 Copy-Item "$root/rust/target/release/egui-demo.exe" "$out/plotcore-egui-demo.exe"
+Invoke-Notices rust (Join-Path $out 'licenses') "$root/rust" egui-demo x86_64-pc-windows-msvc
 Complete-Bundle $out

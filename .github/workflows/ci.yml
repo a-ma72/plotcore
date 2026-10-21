@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2026 Jonas Sattler
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: BSD-3-Clause
 
 name: CI
 
@@ -344,6 +344,14 @@ jobs:
         with:
           name: plotcore-pyqt6-demo-Linux
           path: dist/plotcore-pyqt6-demo-*.AppImage
+          if-no-files-found: error
+
+      # The source RPMs of the libraries the images took from AlmaLinux and
+      # EPEL, which a release publishes beside them (in-container.sh).
+      - uses: actions/upload-artifact@v7
+        with:
+          name: plotcore-appimage-sources
+          path: dist/plotcore-*-appimage-sources.tar
           if-no-files-found: error
 
   # The three demos for Windows, each a folder that starts on a Windows with

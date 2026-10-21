@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- SPDX-FileCopyrightText: 2026 Jonas Sattler -->
-<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<!-- SPDX-License-Identifier: BSD-3-Clause -->
 <!-- The demos' icon: a trace with one spike the envelope kept, on the plot's
      own dark ground, in the first colour of the cycle a plot opens on. -->
 <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">

@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 Jonas Sattler
 # SPDX-FileCopyrightText: 2026 Andreas Martin
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: BSD-3-Clause
 
 """The Python surface over the C interface: what goes in is copied, what is
 named is set, what fails says so, and what is lent comes back."""
