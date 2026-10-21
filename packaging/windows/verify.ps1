@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2026 Jonas Sattler
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: BSD-3-Clause
 #
 # Everything that has to be true of a Windows demo bundle, as verify.sh is for
 # an AppImage. A folder that was produced is not one that starts, and the way
@@ -60,6 +60,21 @@ if ($missing.Count -gt 0) {
     throw "$name does not carry the C++ runtime it needs"
 }
 Write-Host "read the imports of $read files: every runtime DLL they name is carried"
+
+# plotcore's licence, and where the bundle carries Qt, the LGPL-3.0 it is
+# conveyed under and the GPL-3.0 (PyQt6's too): plotcore's own says nothing
+# of them.
+Write-Host '-- the licences of what it carries'
+$texts = @('LICENSE')
+if ($carried.ContainsKey('qt6core.dll')) {
+    $texts += 'licenses/README.md', 'licenses/LGPL-3.0.txt', 'licenses/GPL-3.0.txt'
+}
+foreach ($text in $texts) {
+    if (-not (Test-Path (Join-Path $bundlePath $text) -PathType Leaf)) {
+        throw "$name does not carry $text"
+    }
+}
+Write-Host "it carries $($texts -join ', ')"
 
 # --self-test from the bundle alone: Qt, Python and every toolchain off the
 # PATH, nothing pointing Qt or Python anywhere else, offscreen. Through

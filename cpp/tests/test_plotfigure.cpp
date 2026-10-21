@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 Jonas Sattler
 // SPDX-FileCopyrightText: 2026 Andreas Martin
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: BSD-3-Clause
 
 // The whole plot, driven as a host drives it: lines in, gestures in, a Scene
 // out -- with no window. What the store holds is checked against the elements

@@ -3,7 +3,8 @@
 The plot H5Scope draws, as a library: C++20 with no dependencies, a C
 interface over it, and Python and Rust libraries over that. One directory per
 language, each holding its library, its tests and a demo that walks every
-feature. GPL-3.0-only.
+feature. BSD-3-Clause; up to 0.2.1 it was GPL-3.0-only, and both copyright
+holders agreed to the change.
 
 "The viewer" everywhere in this repository is
 [H5Scope](https://github.com/jonassattler/H5Scope), which pins this repository
@@ -101,7 +102,7 @@ each define their own targets.
 | `python/` | The package (`src/plotcore`: `_native.py`, `figure.py`, `scene.py`, `qt.py`, `mpl.py`), its tests, and `pyqt6-demo/` with the demo's pinned `requirements.txt`. |
 | `rust/` | `plotcore-sys`, `plotcore`, `plotcore-egui`, `egui-demo`, and `README.md`, which each crate also names as its own. |
 | `golden/` | The script the C, Python and Rust tests all run, and its digest. |
-| `packaging/` | The icon; `appimage/`, the demos for Linux; `windows/`, the demos for Windows. |
+| `packaging/` | The icon; `appimage/`, the demos for Linux; `windows/`, the demos for Windows; `licenses/`, what a demo carrying Qt carries beside plotcore's licence. |
 
 ## plotcore and H5Scope
 
@@ -276,7 +277,7 @@ the `PATH`.
 
 - SPDX header on every file: `SPDX-FileCopyrightText: 2026 Jonas Sattler` (and
   `2026 Andreas Martin` beside it on files derived from his work in
-  jonassattler/H5Scope#30) and `SPDX-License-Identifier: GPL-3.0-only`.
+  jonassattler/H5Scope#30) and `SPDX-License-Identifier: BSD-3-Clause`.
 - `.clang-format` (LLVM base, 100 columns, 4 spaces) and `.clang-tidy` — match
   them. `cargo fmt` and `rustfmt.toml` for Rust.
 - Doc comments are `///` on the declaration; `//` blocks above a decision

@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2026 Jonas Sattler
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: BSD-3-Clause
 #
 # The Qt Widgets demo for Windows.
 #
@@ -40,4 +40,5 @@ Copy-Item "$build/cpp/qt-demo/Release/plotcore-qt-demo.exe" $out
     "$out/plotcore-qt-demo.exe"
 Copy-Item "$qt/plugins/platforms/qoffscreen.dll" "$out/platforms/"
 Copy-VCRuntime $out
+Copy-QtLicences $out
 Complete-Bundle $out

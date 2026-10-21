@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2026 Jonas Sattler
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: BSD-3-Clause
 
 # Every feature plotcore has, on one Qt Widgets window. Run with --self-test to
 # have it walk them itself, which is what CI does.

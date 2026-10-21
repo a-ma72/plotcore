@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Jonas Sattler
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: BSD-3-Clause
 #
 # The Qt Widgets demo as an AppImage.
 #
@@ -69,4 +69,5 @@ EXTRA_PLATFORM_PLUGINS="libqoffscreen.so;libqwayland-egl.so;libqwayland-generic.
 
 unbundle_host_libraries "$appdir/usr/lib"
 desktop_and_icon "$appdir" "$appimage_packaging/appimage/plotcore-qt-demo.desktop"
+qt_licences "$appdir"
 pack "$appdir" "$outdir/plotcore-qt-demo-$version-x86_64.AppImage"

@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2026 Jonas Sattler
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: BSD-3-Clause
 #
 # The PyQt6 demo for Windows: the wheel CI tested, PyQt6 and matplotlib, and
 # the demo, frozen by PyInstaller into a folder with a windowed executable.
@@ -66,4 +66,5 @@ try {
     Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
 }
 
+Copy-QtLicences "$dist/plotcore-pyqt6-demo"
 Complete-Bundle "$dist/plotcore-pyqt6-demo"

@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2026 Jonas Sattler
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: BSD-3-Clause
 # shellcheck shell=bash
 #
 # What the three demo AppImages share: the pinned tools, the libraries left to
@@ -207,9 +207,23 @@ desktop_and_icon() {
         "$appdir/usr/share/icons/hicolor/scalable/apps/plotcore.svg"
     install -m 644 "$appimage_packaging/plotcore.png" "$appdir/plotcore.png"
     cp "$appimage_packaging/plotcore.png" "$appdir/.DirIcon"
-    # Each image is a conveyance of GPL-3.0-only object code, so it carries
-    # the licence (section 4).
+    # Each image is plotcore in binary form, so it carries the licence (its
+    # second condition).
     install -Dm 644 "$appimage_root/LICENSE" "$appdir/usr/share/doc/plotcore/LICENSE"
+}
+
+# qt_licences <appdir>
+#
+# Qt is conveyed under the LGPL-3.0, which asks for its own text and the
+# GPL-3.0's beside the work it is part of (section 4), and PyQt6 under the
+# GPL-3.0 alone. plotcore's licence says nothing of either, so an image
+# carrying Qt carries both texts, and a word on which is whose.
+qt_licences() {
+    local appdir="$1"
+    install -Dm 644 -t "$appdir/usr/share/doc/plotcore/licenses" \
+        "$appimage_packaging/licenses/README.md" \
+        "$appimage_packaging/licenses/LGPL-3.0.txt" \
+        "$appimage_packaging/licenses/GPL-3.0.txt"
 }
 
 # pack <appdir> <output>

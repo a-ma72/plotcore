@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2026 Jonas Sattler
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: BSD-3-Clause
 
 # plotcore in C: what the Python and Rust libraries are built on.
 # plotcore::Figure behind a C header, as one shared library that exports that

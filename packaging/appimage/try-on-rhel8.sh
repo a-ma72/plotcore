@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Jonas Sattler
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: BSD-3-Clause
 #
 # Each AppImage's self-test on a stock RHEL 8 with an X server, which is the
 # claim the AppImages make. Stock means BaseOS and AppStream only -- no EPEL,

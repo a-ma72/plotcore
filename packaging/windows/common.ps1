@@ -1,11 +1,11 @@
 # SPDX-FileCopyrightText: 2026 Jonas Sattler
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: BSD-3-Clause
 #
 # What the three Windows demo bundles share. Dot-sourced, not run.
 #
 # A bundle is the Windows counterpart of an AppImage: a folder,
 # plotcore-<toolkit>-demo, holding plotcore-<toolkit>-demo.exe, everything it
-# loads that a fresh Windows does not have, and the licence. verify.ps1 holds
+# loads that a fresh Windows does not have, and the licences. verify.ps1 holds
 # each to that.
 
 Set-StrictMode -Version Latest
@@ -39,8 +39,17 @@ function Copy-VCRuntime([string] $Out) {
     Copy-Item "$crt/*.dll" $Out
 }
 
-# Each bundle is a conveyance of GPL-3.0-only object code, so it carries the
-# licence (section 4).
+# Qt is conveyed under the LGPL-3.0, which asks for its own text and the
+# GPL-3.0's beside the work it is part of (section 4), and PyQt6 under the
+# GPL-3.0 alone. plotcore's licence says nothing of either, so a bundle
+# carrying Qt carries both texts, and a word on which is whose.
+function Copy-QtLicences([string] $Out) {
+    $licences = New-Item -ItemType Directory -Force (Join-Path $Out 'licenses')
+    Copy-Item "$root/packaging/licenses/*" $licences
+}
+
+# Each bundle is plotcore in binary form, so it carries the licence (its
+# second condition).
 function Complete-Bundle([string] $Out) {
     Copy-Item "$root/LICENSE" $Out
     $files = @(Get-ChildItem $Out -Recurse -File)

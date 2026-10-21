@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2026 Jonas Sattler
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: BSD-3-Clause
 
 # The plot without a window, a file or a toolkit.
 #
@@ -88,9 +88,9 @@ if(SKBUILD)
   install(TARGETS plotcore_c
           LIBRARY DESTINATION plotcore
           RUNTIME DESTINATION plotcore)
-  # A wheel conveys the library, so it carries the licence (GPL-3.0 section 4),
-  # where PEP 639 puts one. scikit-build-core finds licences beside
-  # pyproject.toml, and python/ has no copy of this one.
+  # A wheel is the library in binary form, so it carries the licence (its
+  # second condition), where PEP 639 puts one. scikit-build-core finds
+  # licences beside pyproject.toml, and python/ has no copy of this one.
   install(FILES LICENSE DESTINATION "${SKBUILD_METADATA_DIR}/licenses")
 endif()
 

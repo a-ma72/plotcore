@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Jonas Sattler
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: BSD-3-Clause
 #
 # The PyQt6 demo as an AppImage: a Python of its own with the wheel CI
 # tested, PyQt6 and matplotlib installed into it, and the demo beside them.
@@ -57,7 +57,7 @@ install -Dm 644 "$appimage_root/python/pyqt6-demo/signals.py" \
 cat > "$appdir/AppRun" <<'EOF'
 #!/bin/sh
 # SPDX-FileCopyrightText: 2026 Jonas Sattler
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: BSD-3-Clause
 #
 # -I, so that a PYTHONPATH or a user site on the host cannot put a different
 # numpy or PyQt6 under the demo than the one it was packed with.
@@ -74,4 +74,5 @@ bundle_needed "$appdir/usr/lib" \
     "$qt6"/lib/libQt6XcbQpa.so.6
 
 desktop_and_icon "$appdir" "$appimage_packaging/appimage/plotcore-pyqt6-demo.desktop"
+qt_licences "$appdir"
 pack "$appdir" "$outdir/plotcore-pyqt6-demo-$version-x86_64.AppImage"

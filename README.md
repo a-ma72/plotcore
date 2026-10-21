@@ -1,6 +1,6 @@
 <!--
 SPDX-FileCopyrightText: 2026 Jonas Sattler
-SPDX-License-Identifier: GPL-3.0-only
+SPDX-License-Identifier: BSD-3-Clause
 -->
 
 # plotcore
@@ -111,4 +111,10 @@ and the tag has to name it.
 
 ## Licence
 
-GPL-3.0-only. See [LICENSE](LICENSE).
+BSD-3-Clause. See [LICENSE](LICENSE). Releases up to 0.2.1 were
+GPL-3.0-only.
+
+The Qt and PyQt6 demos carry Qt, which they convey under the LGPL-3.0, and
+the PyQt6 demo carries PyQt6, which is GPL-3.0 alone, so that demo's
+packages are distributed under the GPL-3.0 as a whole. Each carries those
+licences beside plotcore's.

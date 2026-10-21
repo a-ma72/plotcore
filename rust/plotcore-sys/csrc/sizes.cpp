@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2026 Jonas Sattler
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: BSD-3-Clause
 
 // The sizes of plotcore.h's structures as this target's C compiler lays them
 // out, for plotcore-sys's test to hold the checked-in bindings to.

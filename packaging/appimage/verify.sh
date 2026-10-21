@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Jonas Sattler
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: BSD-3-Clause
 #
 # Everything that has to be true of a demo AppImage. An AppImage that was
 # produced is not one that runs, and the ways it can be built wrong are quiet:
@@ -58,3 +58,13 @@ test -f "$root/plotcore.png"
 test -f "$root/.DirIcon"
 test -f "$root/usr/share/doc/plotcore/LICENSE"
 echo "$(basename "$desktop"), its icon and the licence are there"
+
+# plotcore's licence says nothing of Qt's, and an image that carries Qt
+# conveys it under the LGPL-3.0 (and PyQt6 under the GPL-3.0).
+if [ -n "$(find "$root" -name 'libQt6Core.so*' -print -quit)" ]; then
+    echo "-- the licences of the Qt it carries"
+    for text in README.md LGPL-3.0.txt GPL-3.0.txt; do
+        test -f "$root/usr/share/doc/plotcore/licenses/$text"
+    done
+    echo "it carries Qt, and the LGPL-3.0 and GPL-3.0 are there"
+fi

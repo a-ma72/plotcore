@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-FileCopyrightText: 2026 Jonas Sattler
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: BSD-3-Clause
 #
 # All three demo AppImages, built inside manylinux_2_28 -- AlmaLinux 8 with
 # gcc-toolset, the image the wheel is built in -- so that each starts on

@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2026 Jonas Sattler
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: BSD-3-Clause
 
 """The PyQt6 widget paints what the scene says and hands the figure what the
 reader did; and the example walks every feature without a failure."""
