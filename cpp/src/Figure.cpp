@@ -41,9 +41,9 @@ constexpr double kInfinity = std::numeric_limits<double>::infinity();
 // depends on nothing the plot draws.
 //
 // It overestimates by the gutters, which is what the renderer's tolerance
-// for a few points per column is for -- see kSamplesPerColumn. Quantised
-// on the other side, so dragging the window's edge does not re-read the
-// file once a pixel.
+// for a few points per column is for: a column is two stations or a chord.
+// Quantised on the other side, so dragging the window's edge does not
+// re-read the file once a pixel.
 //
 // In *device* pixels, which is the other half of "a bucket is a column".
 // A pane is laid out in logical pixels and drawn into a framebuffer with
@@ -1290,8 +1290,21 @@ Scene Figure::compose(const SceneRequest& request)
                     ? fractionOn(sample.y, window.low, window.high, window.logarithmic, cy.base)
                     : fractionOn(sample.y, cy.viewLow(), cy.viewHigh(), cy.logarithmic, cy.base);
             const bool flipped = settings_.flipped;
-            taken = Taken{position, sample.x, sample.y, (flipped ? up : along) * a.width,
-                          a.height - (flipped ? along : up) * a.height};
+            // The same device-pixel centre the stroke was drawn on, so the
+            // crosshair sits on the sample rather than half a pixel beside it.
+            const double ratio = std::max(pixelRatio_, 1.0);
+            const auto centre = [&](double px) {
+                return (std::floor(px * ratio) + 0.5) / ratio;
+            };
+            double px = (flipped ? up : along) * a.width;
+            double py = a.height - (flipped ? along : up) * a.height;
+            if (flipped) {
+                py = centre(py);
+            }
+            else {
+                px = centre(px);
+            }
+            taken = Taken{position, sample.x, sample.y, px, py};
         }
     }
     if (taken.has_value()) {
