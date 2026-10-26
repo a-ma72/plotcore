@@ -23,6 +23,7 @@ try:
     from PyQt6.QtCore import QPointF, QRectF, QSize, Qt, pyqtSignal
     from PyQt6.QtGui import (
         QColor,
+        QCursor,
         QFont,
         QFontMetricsF,
         QImage,
@@ -30,7 +31,7 @@ try:
         QPen,
         QPolygonF,
     )
-    from PyQt6.QtWidgets import QWidget
+    from PyQt6.QtWidgets import QApplication, QWidget
 except ImportError as error:  # pragma: no cover -- said once, plainly
     raise ImportError("plotcore.qt needs PyQt6: pip install plotcore[qt]") from error
 
@@ -75,6 +76,17 @@ def _modifiers(keys) -> Modifiers:
     return out
 
 
+def _held(event) -> Modifiers:
+    # The event carries the modifiers Qt last heard. A Shift held down before
+    # this widget had the keyboard is not among them, so the gesture would
+    # ignore it until a click gave the plot the focus. The platform is asked
+    # as well, which is the keys actually down.
+    return _modifiers(event.modifiers() | QApplication.queryKeyboardModifiers())
+
+
+_MODIFIER_KEYS = (Qt.Key.Key_Shift, Qt.Key.Key_Control, Qt.Key.Key_Alt)
+
+
 def _button(button) -> Optional[Button]:
     return {
         Qt.MouseButton.LeftButton: Button.LEFT,
@@ -96,6 +108,7 @@ class PlotWidget(QWidget):
         self._fonts: Dict[TextRole, QFont] = {}
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.WheelFocus)
+        self._took_focus = False
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent)
         self.setMinimumSize(160, 120)
         self._metrics: Dict[TextRole, QFontMetricsF] = {}
@@ -356,12 +369,47 @@ class PlotWidget(QWidget):
 
     # --- events ---------------------------------------------------------------
 
+    def showEvent(self, event) -> None:  # noqa: N802
+        super().showEvent(event)
+        # A window that opens under the pointer never gets an enter. The plot
+        # takes the keyboard then, so the dock's first box does not keep it.
+        if not self._took_focus:
+            self._took_focus = True
+            self.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def enterEvent(self, event) -> None:  # noqa: N802
+        # Shift and Ctrl are this plot's gestures. They arrive only at the
+        # widget that has the keyboard, so the pointer arriving is enough and
+        # a click is not required first.
+        self.setFocus(Qt.FocusReason.MouseFocusReason)
+        super().enterEvent(event)
+
+    def _follow_modifiers(self) -> None:
+        if QApplication.mouseButtons() == Qt.MouseButton.NoButton:
+            return
+        at = self.mapFromGlobal(QCursor.pos())
+        if not self.rect().contains(at):
+            return
+        self.figure.move(float(at.x()), float(at.y()),
+                         _modifiers(QApplication.queryKeyboardModifiers()))
+        self.update()
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        if not event.isAutoRepeat() and event.key() in _MODIFIER_KEYS:
+            self._follow_modifiers()
+        super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event) -> None:  # noqa: N802
+        if not event.isAutoRepeat() and event.key() in _MODIFIER_KEYS:
+            self._follow_modifiers()
+        super().keyReleaseEvent(event)
+
     def wheelEvent(self, event) -> None:  # noqa: N802
         at = event.position()
         delta = event.angleDelta()
         # Qt reports a vertical wheel with Alt held as a horizontal one.
         angle = delta.y() if delta.y() != 0 else delta.x()
-        self.figure.wheel(at.x(), at.y(), angle, _modifiers(event.modifiers()))
+        self.figure.wheel(at.x(), at.y(), angle, _held(event))
         event.accept()
         self.update()
         self.changed.emit()
@@ -371,14 +419,15 @@ class PlotWidget(QWidget):
         if button is None:
             super().mousePressEvent(event)
             return
+        self.setFocus(Qt.FocusReason.MouseFocusReason)
         at = event.position()
-        self.figure.press(at.x(), at.y(), button, _modifiers(event.modifiers()))
+        self.figure.press(at.x(), at.y(), button, _held(event))
         event.accept()
         self.update()
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802
         at = event.position()
-        self.figure.move(at.x(), at.y(), _modifiers(event.modifiers()))
+        self.figure.move(at.x(), at.y(), _held(event))
         event.accept()
         self.update()
         if event.buttons() != Qt.MouseButton.NoButton:
@@ -390,7 +439,7 @@ class PlotWidget(QWidget):
             super().mouseReleaseEvent(event)
             return
         at = event.position()
-        self.figure.release(at.x(), at.y(), button, _modifiers(event.modifiers()))
+        self.figure.release(at.x(), at.y(), button, _held(event))
         event.accept()
         self.update()
         self.changed.emit()

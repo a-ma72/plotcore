@@ -630,6 +630,43 @@ TEST_CASE("a flipped figure draws x up the pane and y across it", "[figure]")
     REQUIRE(zoomed.y.low == scene.y.low);
 }
 
+TEST_CASE("a flipped right drag takes the pane's directions, as the wheel does", "[figure]")
+{
+    Figure figure = figureOf({ramp(200, 0.0, 2.0)});
+    FigureSettings settings = figure.settings();
+    settings.flipped = true;
+    figure.setSettings(settings);
+    const Scene scene = figure.scene();
+    const PaneRect& a = scene.area;
+    const double x0 = a.x + 0.2 * a.width;
+    const double x1 = a.x + 0.6 * a.width;
+    const double y0 = a.y + 0.2 * a.height;
+    const double y1 = a.y + 0.6 * a.height;
+
+    // Shift is across the pane, which is data y, and the band fills the height.
+    figure.press(x0, y0, Button::Right, Modifiers{true, false, false});
+    figure.move(x1, y1, Modifiers{true, false, false});
+    REQUIRE(figure.scene().band->width == Approx(x1 - x0));
+    REQUIRE(figure.scene().band->height == Approx(a.height));
+    figure.release(x1, y1, Button::Right, Modifiers{true, false, false});
+    Scene zoomed = figure.scene();
+    REQUIRE(zoomed.y.high - zoomed.y.low < scene.y.high - scene.y.low);
+    REQUIRE(zoomed.x.low == scene.x.low);
+    REQUIRE(zoomed.x.high == scene.x.high);
+
+    // Control is up the pane, which is data x, and the band fills the width.
+    figure.resetView();
+    figure.press(x0, y0, Button::Right, Modifiers{false, true, false});
+    figure.move(x1, y1, Modifiers{false, true, false});
+    REQUIRE(figure.scene().band->width == Approx(a.width));
+    REQUIRE(figure.scene().band->height == Approx(y1 - y0));
+    figure.release(x1, y1, Button::Right, Modifiers{false, true, false});
+    zoomed = figure.scene();
+    REQUIRE(zoomed.x.high - zoomed.x.low < scene.x.high - scene.x.low);
+    REQUIRE(zoomed.y.low == scene.y.low);
+    REQUIRE(zoomed.y.high == scene.y.high);
+}
+
 TEST_CASE("the crosshair reads the sample under the pointer, written as the axis writes",
           "[figure]")
 {
@@ -1423,6 +1460,99 @@ TEST_CASE("a band being drawn writes its corners and its lengths, clear of every
     const Scene bare = figure.scene();
     REQUIRE(bare.band.has_value());
     REQUIRE(bare.bandLabels.empty());
+}
+
+TEST_CASE("shift and control on a right drag zoom one axis, and the band fills the pane",
+          "[figure][band]")
+{
+    Figure figure = figureOf({walk(50000)});
+    const Scene before = figure.scene();
+    const PaneRect a = before.area;
+    const double x0 = a.x + 0.2 * a.width;
+    const double x1 = a.x + 0.55 * a.width;
+    const double y0 = a.y + 0.25 * a.height;
+    const double y1 = a.y + 0.7 * a.height;
+    const Modifiers shift{true, false, false};
+    const Modifiers control{false, true, false};
+    const Modifiers both{true, true, false};
+
+    // Shift: the band is as wide as the drag and as tall as the pane, and
+    // only x moves. The numbers name that axis and its span.
+    figure.press(x0, y0, Button::Right, shift);
+    figure.move(x1, y1, shift);
+    const Scene drawing = figure.scene();
+    REQUIRE(drawing.band->x == Approx(x0));
+    REQUIRE(drawing.band->y == Approx(a.y));
+    REQUIRE(drawing.band->width == Approx(x1 - x0));
+    REQUIRE(drawing.band->height == Approx(a.height));
+    const auto across = labelsOf(drawing);
+    REQUIRE(across.at("start").text == figure.xNumber(figure.camera().dataXAt(x0, y0)));
+    REQUIRE(across.at("end").text == figure.xNumber(figure.camera().dataXAt(x1, y1)));
+    REQUIRE(across.count("width") + across.count("widthAbove") + across.count("widthBelow") == 1);
+    REQUIRE(across.count("height") == 0);
+    REQUIRE(across.count("heightLeft") == 0);
+    REQUIRE(across.count("heightRight") == 0);
+    const double lowX = figure.camera().dataXAt(x0, y0);
+    const double highX = figure.camera().dataXAt(x1, y0);
+    figure.release(x1, y1, Button::Right, shift);
+    const Scene after = figure.scene();
+    REQUIRE(after.x.low == Approx(lowX));
+    REQUIRE(after.x.high == Approx(highX));
+    REQUIRE(after.y.low == before.y.low);
+    REQUIRE(after.y.high == before.y.high);
+
+    // A short drag on the taken axis is not a zoom, however far the other moved.
+    figure.press(x0, y0, Button::Right, shift);
+    figure.release(x0 + 3.0, y1, Button::Right, shift);
+    REQUIRE(figure.scene().x.low == after.x.low);
+    REQUIRE(figure.scene().y.low == after.y.low);
+
+    // The keys can change while the button is down, and release is what counts.
+    figure.resetView();
+    const Scene home = figure.scene();
+    figure.press(x0, y0, Button::Right, shift);
+    figure.move(x1, y1, shift);
+    REQUIRE(figure.scene().band->height == Approx(home.area.height));
+    figure.move(x1, y1, control);
+    const Scene upright = figure.scene();
+    REQUIRE(upright.band->width == Approx(home.area.width));
+    REQUIRE(upright.band->height == Approx(y1 - y0));
+    REQUIRE(upright.band->x == Approx(home.area.x));
+    const auto up = labelsOf(upright);
+    REQUIRE(up.at("start").text == figure.yNumber(figure.camera().dataYAt(y0, x0)));
+    REQUIRE(up.at("end").text == figure.yNumber(figure.camera().dataYAt(y1, x1)));
+    REQUIRE(up.count("height") + up.count("heightLeft") + up.count("heightRight") == 1);
+    REQUIRE(up.count("width") == 0);
+    REQUIRE(up.count("widthAbove") == 0);
+    REQUIRE(up.count("widthBelow") == 0);
+    const double lowY = figure.camera().dataYAt(y1, x0);
+    const double highY = figure.camera().dataYAt(y0, x0);
+    figure.release(x1, y1, Button::Right, control);
+    const Scene yZoomed = figure.scene();
+    REQUIRE(yZoomed.x.low == home.x.low);
+    REQUIRE(yZoomed.x.high == home.x.high);
+    REQUIRE(yZoomed.y.low == Approx(lowY));
+    REQUIRE(yZoomed.y.high == Approx(highY));
+
+    // A short drag on y is not a zoom either.
+    figure.press(x0, y0, Button::Right, control);
+    figure.release(x1, y0 + 3.0, Button::Right, control);
+    REQUIRE(figure.scene().y.low == yZoomed.y.low);
+    REQUIRE(figure.scene().x.low == yZoomed.x.low);
+
+    // Both keys, like neither, open the rectangle and both axes.
+    figure.resetView();
+    const Scene open = figure.scene();
+    figure.press(x0, y0, Button::Right, both);
+    figure.move(x1, y1, both);
+    const Scene rectangle = figure.scene();
+    REQUIRE(rectangle.band->width == Approx(x1 - x0));
+    REQUIRE(rectangle.band->height == Approx(y1 - y0));
+    REQUIRE(labelsOf(rectangle).at("start").text.find(',') != std::string::npos);
+    figure.release(x1, y1, Button::Right, both);
+    const Scene closed = figure.scene();
+    REQUIRE(closed.x.high - closed.x.low < open.x.high - open.x.low);
+    REQUIRE(closed.y.high - closed.y.low < open.y.high - open.y.low);
 }
 
 TEST_CASE("the legend on the plot names twelve lines and counts the rest", "[figure]")
