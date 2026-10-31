@@ -871,18 +871,23 @@ Scene Figure::compose(const SceneRequest& request)
         const PlotView view = lineView(line, upright);
         const PlotProjected result = projectLine(line, axis, view, points, runs);
         // The way back to the values, through the view that projected them,
-        // before the points are turned onto a flipped pane. The power is
-        // exp2(position * log2(base)) and not axisValue's std::pow. A
-        // logarithmic scene sums a few hundred of these into the golden
-        // digest, and glibc's pow and the Windows one disagree on that sum by
-        // more than the digest's relative 1e-9, while the pixels are
-        // unchanged. exp2 stays within an ulp of pow. The view keeps pow,
-        // because a wheel that moved onto exp2 lands its columns on different
-        // pixels wherever an edge was sitting on a boundary.
-        const double xFrom = axisPosition(view.xMin, view.xLog, view.xLogBase);
-        const double xTo = axisPosition(view.xMax, view.xLog, view.xLogBase);
-        const double yFrom = axisPosition(view.yMin, view.yLog, view.yLogBase);
-        const double yTo = axisPosition(view.yMax, view.yLog, view.yLogBase);
+        // before the points are turned onto a flipped pane. The position is
+        // log2(value) / log2(base) and the value is exp2 of it. A logarithmic
+        // scene sums a few hundred of these into the golden digest. On Windows
+        // that sum of data x missed glibc's by 0.221, past the digest's
+        // relative 1e-9, while the pixels were the same pixels; rebuilding
+        // only the power with exp2 left the sum where it was, so the split is
+        // in log10. log2 is correctly rounded where log10 is not, and it stays
+        // within an ulp of log10 here, so the picture does not move. The view
+        // keeps log10 and pow: a wheel on this pair lands a column on the next
+        // pixel wherever its edge was sitting on a boundary.
+        const auto logPos = [](double value, double base) {
+            return std::log2(value) / std::log2(base);
+        };
+        const double xFrom = view.xLog ? logPos(view.xMin, view.xLogBase) : view.xMin;
+        const double xTo = view.xLog ? logPos(view.xMax, view.xLogBase) : view.xMax;
+        const double yFrom = view.yLog ? logPos(view.yMin, view.yLogBase) : view.yMin;
+        const double yTo = view.yLog ? logPos(view.yMax, view.yLogBase) : view.yMax;
         const auto valueBack = [](double position, bool logarithmic, double base) {
             return logarithmic ? std::exp2(position * std::log2(base)) : position;
         };
