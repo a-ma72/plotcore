@@ -871,16 +871,26 @@ Scene Figure::compose(const SceneRequest& request)
         const PlotView view = lineView(line, upright);
         const PlotProjected result = projectLine(line, axis, view, points, runs);
         // The way back to the values, through the view that projected them,
-        // before the points are turned onto a flipped pane.
+        // before the points are turned onto a flipped pane. The power is
+        // exp2(position * log2(base)) and not axisValue's std::pow. A
+        // logarithmic scene sums a few hundred of these into the golden
+        // digest, and glibc's pow and the Windows one disagree on that sum by
+        // more than the digest's relative 1e-9, while the pixels are
+        // unchanged. exp2 stays within an ulp of pow. The view keeps pow,
+        // because a wheel that moved onto exp2 lands its columns on different
+        // pixels wherever an edge was sitting on a boundary.
         const double xFrom = axisPosition(view.xMin, view.xLog, view.xLogBase);
         const double xTo = axisPosition(view.xMax, view.xLog, view.xLogBase);
         const double yFrom = axisPosition(view.yMin, view.yLog, view.yLogBase);
         const double yTo = axisPosition(view.yMax, view.yLog, view.yLogBase);
+        const auto valueBack = [](double position, bool logarithmic, double base) {
+            return logarithmic ? std::exp2(position * std::log2(base)) : position;
+        };
         const auto valueOf = [&](const Point& p) {
             const double across = view.width > 0.0 ? p.x() / view.width : 0.0;
             const double up = view.height > 0.0 ? 1.0 - p.y() / view.height : 0.0;
-            return Point(axisValue(xFrom + across * (xTo - xFrom), view.xLog, view.xLogBase),
-                         axisValue(yFrom + up * (yTo - yFrom), view.yLog, view.yLogBase));
+            return Point(valueBack(xFrom + across * (xTo - xFrom), view.xLog, view.xLogBase),
+                         valueBack(yFrom + up * (yTo - yFrom), view.yLog, view.yLogBase));
         };
         std::vector<Point> values;
         if (want.values) {
