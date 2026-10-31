@@ -348,6 +348,18 @@ PlotProjected projectLine(const PlotLine& line, const PlotAxis& axis, const Plot
     const double pixelRatio = std::max(view.pixelRatio, 1.0);
     const auto place = [&](double px, double py) {
         if (std::isfinite(px)) {
+            // The pixel is floor of this. A logarithmic column edge that
+            // falls on a pixel boundary comes back an ulp under that integer
+            // from one libm and an ulp over it from the other, and floor gives
+            // them different pixels. The golden sum of data x then misses its
+            // relative 1e-9, while the sum of the pixels can still agree when
+            // another edge steps the other way. A millionth of a pixel is
+            // still that boundary. A real sample is nowhere near it.
+            const double scaled = px * pixelRatio;
+            const double nearest = std::nearbyint(scaled);
+            if (std::abs(scaled - nearest) <= 1e-6) {
+                px = nearest / pixelRatio;
+            }
             px = (std::floor(px * pixelRatio) + 0.5) / pixelRatio;
         }
         if (open < 0) {
