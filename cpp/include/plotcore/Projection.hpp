@@ -228,6 +228,12 @@ struct ColumnScratch
     };
 
     std::vector<Column> columns;
+    /// The `n + 1` boundaries of those columns, written once per projection.
+    ///
+    /// Recomputing `(k0+i)*width` at each use rounded differently under MSVC
+    /// than this stored loop, and a boundary an ulp off owns a different
+    /// sample once the axis is logarithmic. The golden digest is this loop.
+    std::vector<double> edges;
 
     /// Ensure room for `n` columns and reset each to empty (NaN lows/highs).
     void prepare(std::size_t n);

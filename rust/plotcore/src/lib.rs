@@ -1336,8 +1336,12 @@ mod tests {
         figure.set_view(4000.0, 4100.0, 0.0, (1 << 20) as f64).unwrap();
         let scene = figure.scene().unwrap();
         assert!(asked.load(Ordering::SeqCst) > 0);
+        // The stroke is drawn at the centre of the pixel its element fell in,
+        // and the recorded x is that centre. Half a pixel of this window is a
+        // fraction of one sample; a fold of the base would be a bucket away.
+        let pixel = (scene.view[1] - scene.view[0]) / scene.area.width;
         for p in &scene.lines[0].values[0] {
-            assert!((p[0] - p[1]).abs() < 1e-6, "every value is its element");
+            assert!((p[0] - p[1]).abs() < pixel, "every value is its element");
         }
         assert_eq!(dropped.load(Ordering::SeqCst), 0);
         figure.remove_line(0).unwrap();

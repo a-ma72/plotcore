@@ -562,14 +562,26 @@ PlotProjected projectLine(const PlotLine& line, const PlotAxis& axis, const Plot
     if ((indexGrid || locatedGrid) && xHighBound > xLowBound &&
         !(view.xLog && !(xLowBound > 0.0))) {
         const double width = (xHighBound - xLowBound) / static_cast<double>(columns);
+        ColumnScratch& columnsBuf = columnScratchOf(scratch);
+        std::vector<double>& edges = columnsBuf.edges;
+        const auto edgeCount = static_cast<std::size_t>(columns) + 1;
+        if (edges.size() < edgeCount) {
+            edges.resize(edgeCount);
+        }
         bool edgesOk = width > 0.0 && std::isfinite(width);
-        // Edge i is computed, not stored: (k0+i)*width, or exp((k0+i)*logWidth).
+        // A logarithmic edge is placed from its grid index. It sits on a pixel
+        // boundary, and exp of that index followed by log10 of the result falls
+        // a hair either side of the boundary: floor() then keeps a different
+        // pixel on each libm, and the summed data-x of those pixels misses the
+        // golden tolerance. The index is the position.
+        bool logEdges = false;
         double edgeK0 = 0.0;
-        double edgeStep = width;
-        bool edgeLog = false;
+        double edgeOrigin = 0.0;
         if (edgesOk && !view.xLog) {
-            edgeK0 = std::floor(xLowBound / width + 0.5);
-            edgeStep = width;
+            const double k0 = std::floor(xLowBound / width + 0.5);
+            for (std::int64_t i = 0; i <= columns; ++i) {
+                edges[static_cast<std::size_t>(i)] = (k0 + static_cast<double>(i)) * width;
+            }
         }
         else if (edgesOk) {
             const double p0 = std::log(xLowBound);
@@ -577,16 +589,31 @@ PlotProjected projectLine(const PlotLine& line, const PlotAxis& axis, const Plot
             const double logWidth = (p1 - p0) / static_cast<double>(columns);
             edgesOk = logWidth > 0.0 && std::isfinite(logWidth);
             if (edgesOk) {
+                logEdges = true;
                 edgeK0 = std::floor(p0 / logWidth + 0.5);
-                edgeStep = logWidth;
-                edgeLog = true;
+                edgeOrigin = p0 / logWidth;
+                for (std::int64_t i = 0; i <= columns; ++i) {
+                    edges[static_cast<std::size_t>(i)] =
+                        std::exp((edgeK0 + static_cast<double>(i)) * logWidth);
+                }
             }
         }
-        const auto edgeAt = [&](std::int64_t i) {
-            const double k = edgeK0 + static_cast<double>(i);
-            return edgeLog ? std::exp(k * edgeStep) : k * edgeStep;
-        };
         if (edgesOk) {
+            const auto xOfEdge = [&](std::int64_t i) {
+                if (!logEdges) {
+                    return toX(edges[static_cast<std::size_t>(i)]);
+                }
+                const double n = static_cast<double>(columns);
+                const double at = edgeK0 + static_cast<double>(i);
+                double px = (at * w - edgeOrigin * w) / n;
+                // The same boundary, reached through a log that is not exact.
+                // An ulp here is not a different pixel.
+                const double nearest = std::round(px);
+                if (std::abs(px - nearest) <= 1e-8) {
+                    px = nearest;
+                }
+                return px;
+            };
             const auto accept = [&](std::int64_t i, double x) -> std::optional<double> {
                 const double value = line.values[i];
                 if (!yMap.draws(value) || !xMap.draws(x)) {
@@ -599,8 +626,17 @@ PlotProjected projectLine(const PlotLine& line, const PlotAxis& axis, const Plot
                 if (!std::isfinite(t) || t < 0.0) {
                     return {};
                 }
-                if (t >= lastIndex) {
-                    return accept(count - 1, x0 + lastIndex * dx);
+                // An edge past the last sample has no second sample to chord
+                // to. Answering it with the last value, and letting the caller
+                // place that answer at the edge, drew the line on across the
+                // rest of the pane: a short line beside a longer one ran to
+                // the frame at its last value. A zoom that left the short
+                // line's own samples behind then dropped the stroke, because
+                // the value being held was no longer in the window. The line
+                // ends at its last sample, as an edge before the first sample
+                // already ends it.
+                if (t > lastIndex) {
+                    return {};
                 }
                 const double rounded = std::round(t);
                 if (std::abs(t - rounded) <= 1e-9) {
@@ -663,12 +699,11 @@ PlotProjected projectLine(const PlotLine& line, const PlotAxis& axis, const Plot
                 }
             };
 
-            ColumnScratch& columnsBuf = columnScratchOf(scratch);
             columnsBuf.prepare(static_cast<std::size_t>(columns));
             int most = 0;
             for (std::int64_t column = 0; column < columns; ++column) {
-                const double leftEdge = edgeAt(column);
-                const double rightEdge = edgeAt(column + 1);
+                const double leftEdge = edges[static_cast<std::size_t>(column)];
+                const double rightEdge = edges[static_cast<std::size_t>(column + 1)];
                 std::int64_t start = 0;
                 std::int64_t end = 0;
                 if (indexGrid) {
@@ -713,8 +748,8 @@ PlotProjected projectLine(const PlotLine& line, const PlotAxis& axis, const Plot
             if (most > 1) {
                 bool linked = false;
                 for (std::int64_t column = 0; column < columns; ++column) {
-                    const double leftEdge = edgeAt(column);
-                    const double rightEdge = edgeAt(column + 1);
+                    const double leftEdge = edges[static_cast<std::size_t>(column)];
+                    const double rightEdge = edges[static_cast<std::size_t>(column + 1)];
                     const ColumnScratch::Column& slot =
                         columnsBuf.columns[static_cast<std::size_t>(column)];
                     const double low = slot.low;
@@ -738,6 +773,24 @@ PlotProjected projectLine(const PlotLine& line, const PlotAxis& axis, const Plot
                     const std::optional<double> yLeft = chordAt(leftEdge);
                     const std::optional<double> yRight = chordAt(rightEdge);
                     if (!yLeft || !yRight || !xMap.draws(leftEdge) || !xMap.draws(rightEdge)) {
+                        // The column still holds the end of the line: its
+                        // right edge is past the last sample, so there is no
+                        // chord there, but the sample itself is in the column.
+                        // Stop on it. Carrying the last value out to the edge
+                        // is what drew a short line on to the frame.
+                        if (indexGrid && yLeft && xMap.draws(leftEdge)) {
+                            const double xLast = x0 + static_cast<double>(count - 1) * dx;
+                            if (leftEdge <= xLast && rightEdge > xLast && xMap.draws(xLast)) {
+                                if (const std::optional<double> yEnd =
+                                        chordIndex((xLast - x0) / dx)) {
+                                    if (!linked) {
+                                        place(xOfEdge(column), toY(*yLeft));
+                                    }
+                                    place(toX(xLast), toY(*yEnd));
+                                    linked = true;
+                                }
+                            }
+                        }
                         if (linked) {
                             closeRun();
                             linked = false;
@@ -745,9 +798,9 @@ PlotProjected projectLine(const PlotLine& line, const PlotAxis& axis, const Plot
                         continue;
                     }
                     if (!linked) {
-                        place(toX(leftEdge), toY(*yLeft));
+                        place(xOfEdge(column), toY(*yLeft));
                     }
-                    place(toX(rightEdge), toY(*yRight));
+                    place(xOfEdge(column + 1), toY(*yRight));
                     linked = true;
                 }
                 closeRun();

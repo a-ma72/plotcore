@@ -210,9 +210,20 @@ jobs:
         run: python -m pip wheel --no-deps ./python -w wheelhouse
 
       # What PyQt6's own Qt needs from the system to start offscreen.
+      # ubuntu-latest loses DNS for the archive hosts for a moment, and apt
+      # then stops on packages it had already resolved. Another attempt
+      # after a pause gets past that.
       - name: Install what Qt needs
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libegl1 libxkbcommon0 libfontconfig1 libdbus-1-3 libgl1
+        run: |
+          packages="libegl1 libxkbcommon0 libfontconfig1 libdbus-1-3 libgl1"
+          for attempt in 1 2 3 4 5; do
+            if sudo apt-get update && sudo apt-get install -y $packages; then
+              exit 0
+            fi
+            sleep $((attempt * 10))
+          done
+          exit 1
 
       - name: Install the wheel
         shell: bash
@@ -254,14 +265,20 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # What winit and the clipboard link against to build at all.
+      # What winit and the clipboard link against to build at all. The
+      # archive hosts fail to resolve for a moment, as in the Python job.
       - name: Install what eframe needs
         if: runner.os == 'Linux'
         working-directory: .
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libxkbcommon-dev libxcb-render0-dev libxcb-shape0-dev \
-                                  libxcb-xfixes0-dev libwayland-dev
+          packages="libxkbcommon-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libwayland-dev"
+          for attempt in 1 2 3 4 5; do
+            if sudo apt-get update && sudo apt-get install -y $packages; then
+              exit 0
+            fi
+            sleep $((attempt * 10))
+          done
+          exit 1
 
       # With no name, rustup installs the one rust-toolchain.toml pins.
       - name: Toolchain
@@ -322,7 +339,16 @@ jobs:
           APPIMAGE_EXTRACT_AND_RUN: 1
           QT_QPA_PLATFORM: offscreen
         run: |
-          sudo apt-get update && sudo apt-get install -y libegl1 libfontconfig1 libdbus-1-3 libgl1
+          packages="libegl1 libfontconfig1 libdbus-1-3 libgl1"
+          for attempt in 1 2 3 4 5; do
+            if sudo apt-get update && sudo apt-get install -y $packages; then
+              break
+            fi
+            if [ "$attempt" = 5 ]; then
+              exit 1
+            fi
+            sleep $((attempt * 10))
+          done
           for image in dist/*.AppImage; do
             echo "== $image"
             "$image" --self-test | tail -1

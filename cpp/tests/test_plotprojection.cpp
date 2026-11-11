@@ -2082,6 +2082,33 @@ TEST_CASE("the chord at an edge lengthens both columns", "[plot][seam]")
     }
 }
 
+TEST_CASE("a line ends at its last sample and is not held on to the frame", "[plot]")
+{
+    // A square wave of twenty thousand samples drawn beside a line of two
+    // hundred thousand ran on to the right edge at its last value. The edge
+    // past the last sample was answered with that sample, and the chord was
+    // placed at the edge. Zooming until the wave left the window dropped the
+    // stroke, because the sample it was holding was no longer there.
+    std::vector<double> values(20000);
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        values[i] = (i / 250) % 2 == 0 ? -1.0 : 1.0;
+    }
+    const plotcore::PlotView view = paneOver(0.0, 199999.0, -6.0, 105.0);
+    const Projected drawn = project(lineOver(values), plotcore::PlotAxis{}, view);
+    REQUIRE_FALSE(drawn.points.empty());
+
+    double maxX = 0.0;
+    for (const plotcore::Point& point : drawn.points) {
+        const double x = view.xMin + point.x() / view.width * (view.xMax - view.xMin);
+        maxX = std::max(maxX, x);
+    }
+    // Within a column of the last sample. That is the tolerance the envelope
+    // already has: a column owns the samples that fall in it.
+    const double column = (view.xMax - view.xMin) / view.width;
+    CHECK(maxX <= static_cast<double>(values.size() - 1) + column);
+    CHECK(maxX >= static_cast<double>(values.size() - 1) - column);
+}
+
 TEST_CASE("a line that names its positions is still thinned for a narrower pane",
           "[plot][positions]")
 {
