@@ -203,6 +203,34 @@ struct PlotLine
     /// axis and keeps its scale: its window is a share of the common one in
     /// the common one's positions.
     bool ownYLog = false;
+
+    /// Whether the line's x values are non-decreasing, when the owner already
+    /// knows. `projectLine` uses this instead of scanning every x: a Plot has
+    /// ordered its time base once, and a pyramid's positions only ever run
+    /// forward. Unset means "look" -- what a hand-built line in a test does.
+    std::optional<bool> xOrdered;
+};
+
+/// Working memory for `projectLine`'s device-pixel columns.
+///
+/// Grown to the pane, overwritten each use, and meant to be reused across the
+/// lines of a frame -- one allocation that then only grows with the widest
+/// pane, rather than four fresh vectors per line per compose. A host that
+/// draws many lines (Figure) keeps one; callers that omit it share a
+/// thread-local of the same shape.
+struct ColumnScratch
+{
+    struct Column
+    {
+        double low = 0.0;
+        double high = 0.0;
+        int count = 0;
+    };
+
+    std::vector<Column> columns;
+
+    /// Ensure room for `n` columns and reset each to empty (NaN lows/highs).
+    void prepare(std::size_t n);
 };
 
 /// One closer look at a line: an aligned run of it, to be summarised at a
@@ -613,8 +641,11 @@ struct PlotProjected
 /// gaps, and append each stroke to `runs`. Both vectors are appended to, so a
 /// set of lines projects into one pair of buffers.
 ///
+/// `scratch` holds the column mins/maxes for a dense base-1 envelope; pass the
+/// same one for every line of a frame. Null uses a thread-local scratch.
 PlotProjected projectLine(const PlotLine& line, const PlotAxis& axis, const PlotView& view,
-                          std::vector<Point>& points, std::vector<PlotRun>& runs);
+                          std::vector<Point>& points, std::vector<PlotRun>& runs,
+                          ColumnScratch* scratch = nullptr);
 
 /// The sample a crosshair snaps to: which line, its value and x, and where it
 /// was drawn on the pane.

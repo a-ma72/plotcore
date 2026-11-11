@@ -869,7 +869,8 @@ Scene Figure::compose(const SceneRequest& request)
         std::vector<Point> points;
         std::vector<PlotRun> runs;
         const PlotView view = lineView(line, upright);
-        const PlotProjected result = projectLine(line, axis, view, points, runs);
+        const PlotProjected result =
+            projectLine(line, axis, view, points, runs, &columnScratch_);
         // The way back to the values, through the view that projected them,
         // before the points are turned onto a flipped pane.
         const double xFrom = axisPosition(view.xMin, view.xLog, view.xLogBase);

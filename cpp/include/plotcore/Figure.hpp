@@ -694,6 +694,8 @@ private:
     double width_ = 640.0;
     double height_ = 400.0;
     double pixelRatio_ = 1.0;
+    /// Column mins/maxes for projectLine, reused across every line of a compose.
+    mutable ColumnScratch columnScratch_;
 
     // What a gesture in progress is doing.
     enum class Drag

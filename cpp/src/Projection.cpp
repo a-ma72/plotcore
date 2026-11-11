@@ -281,8 +281,36 @@ Point uprightPoint(const Point& onPane, const PlotView& view)
     return {view.height - onPane.y(), view.width - onPane.x()};
 }
 
+void ColumnScratch::prepare(std::size_t n)
+{
+    if (columns.size() < n) {
+        columns.resize(n);
+    }
+    const double quiet = std::numeric_limits<double>::quiet_NaN();
+    for (std::size_t i = 0; i < n; ++i) {
+        columns[i] = Column{quiet, quiet, 0};
+    }
+}
+
+namespace {
+
+ColumnScratch& columnScratchOf(ColumnScratch* scratch)
+{
+    if (scratch != nullptr) {
+        return *scratch;
+    }
+    // One buffer per thread, grown to the widest pane that thread has drawn.
+    // Figure passes its own so every line of a compose shares capacity without
+    // depending on which thread painted; tests and one-off callers land here.
+    thread_local ColumnScratch local;
+    return local;
+}
+
+} // namespace
+
 PlotProjected projectLine(const PlotLine& line, const PlotAxis& axis, const PlotView& view,
-                          std::vector<Point>& points, std::vector<PlotRun>& runs)
+                          std::vector<Point>& points, std::vector<PlotRun>& runs,
+                          ColumnScratch* scratch)
 {
     const auto startRuns = static_cast<int>(runs.size());
     const auto added = [&](bool decimated) {
@@ -378,6 +406,9 @@ PlotProjected projectLine(const PlotLine& line, const PlotAxis& axis, const Plot
     // sample for sample. An ascending time base is a column, below.
     const bool located = line.positions != nullptr || axis.explicitX();
     const auto ascending = [&]() {
+        if (line.xOrdered.has_value()) {
+            return *line.xOrdered;
+        }
         if (count < 2) {
             return true;
         }
@@ -531,13 +562,14 @@ PlotProjected projectLine(const PlotLine& line, const PlotAxis& axis, const Plot
     if ((indexGrid || locatedGrid) && xHighBound > xLowBound &&
         !(view.xLog && !(xLowBound > 0.0))) {
         const double width = (xHighBound - xLowBound) / static_cast<double>(columns);
-        std::vector<double> edges(static_cast<std::size_t>(columns) + 1);
         bool edgesOk = width > 0.0 && std::isfinite(width);
+        // Edge i is computed, not stored: (k0+i)*width, or exp((k0+i)*logWidth).
+        double edgeK0 = 0.0;
+        double edgeStep = width;
+        bool edgeLog = false;
         if (edgesOk && !view.xLog) {
-            const double k0 = std::floor(xLowBound / width + 0.5);
-            for (std::int64_t i = 0; i <= columns; ++i) {
-                edges[static_cast<std::size_t>(i)] = (k0 + static_cast<double>(i)) * width;
-            }
+            edgeK0 = std::floor(xLowBound / width + 0.5);
+            edgeStep = width;
         }
         else if (edgesOk) {
             const double p0 = std::log(xLowBound);
@@ -545,13 +577,15 @@ PlotProjected projectLine(const PlotLine& line, const PlotAxis& axis, const Plot
             const double logWidth = (p1 - p0) / static_cast<double>(columns);
             edgesOk = logWidth > 0.0 && std::isfinite(logWidth);
             if (edgesOk) {
-                const double k0 = std::floor(p0 / logWidth + 0.5);
-                for (std::int64_t i = 0; i <= columns; ++i) {
-                    edges[static_cast<std::size_t>(i)] =
-                        std::exp((k0 + static_cast<double>(i)) * logWidth);
-                }
+                edgeK0 = std::floor(p0 / logWidth + 0.5);
+                edgeStep = logWidth;
+                edgeLog = true;
             }
         }
+        const auto edgeAt = [&](std::int64_t i) {
+            const double k = edgeK0 + static_cast<double>(i);
+            return edgeLog ? std::exp(k * edgeStep) : k * edgeStep;
+        };
         if (edgesOk) {
             const auto accept = [&](std::int64_t i, double x) -> std::optional<double> {
                 const double value = line.values[i];
@@ -629,14 +663,12 @@ PlotProjected projectLine(const PlotLine& line, const PlotAxis& axis, const Plot
                 }
             };
 
-            const double quiet = std::numeric_limits<double>::quiet_NaN();
-            std::vector<double> columnLow(static_cast<std::size_t>(columns), quiet);
-            std::vector<double> columnHigh(static_cast<std::size_t>(columns), quiet);
-            std::vector<int> columnCount(static_cast<std::size_t>(columns), 0);
+            ColumnScratch& columnsBuf = columnScratchOf(scratch);
+            columnsBuf.prepare(static_cast<std::size_t>(columns));
             int most = 0;
             for (std::int64_t column = 0; column < columns; ++column) {
-                const double leftEdge = edges[static_cast<std::size_t>(column)];
-                const double rightEdge = edges[static_cast<std::size_t>(column + 1)];
+                const double leftEdge = edgeAt(column);
+                const double rightEdge = edgeAt(column + 1);
                 std::int64_t start = 0;
                 std::int64_t end = 0;
                 if (indexGrid) {
@@ -661,34 +693,33 @@ PlotProjected projectLine(const PlotLine& line, const PlotAxis& axis, const Plot
                 if (end < start) {
                     end = start;
                 }
-                double& low = columnLow[static_cast<std::size_t>(column)];
-                double& high = columnHigh[static_cast<std::size_t>(column)];
-                int& n = columnCount[static_cast<std::size_t>(column)];
+                ColumnScratch::Column& slot = columnsBuf.columns[static_cast<std::size_t>(column)];
                 for (std::int64_t i = start; i < end; ++i) {
                     const double value = line.values[i];
                     if (!yMap.draws(value)) {
                         continue;
                     }
-                    include(low, high, value);
-                    ++n;
+                    include(slot.low, slot.high, value);
+                    ++slot.count;
                 }
                 if (const std::optional<double> y = chordAt(leftEdge)) {
-                    include(low, high, *y);
+                    include(slot.low, slot.high, *y);
                 }
                 if (const std::optional<double> y = chordAt(rightEdge)) {
-                    include(low, high, *y);
+                    include(slot.low, slot.high, *y);
                 }
-                most = std::max(most, n);
+                most = std::max(most, slot.count);
             }
             if (most > 1) {
                 bool linked = false;
                 for (std::int64_t column = 0; column < columns; ++column) {
-                    const double leftEdge = edges[static_cast<std::size_t>(column)];
-                    const double rightEdge = edges[static_cast<std::size_t>(column + 1)];
-                    const double low = columnLow[static_cast<std::size_t>(column)];
-                    const double high = columnHigh[static_cast<std::size_t>(column)];
-                    const bool tall = columnCount[static_cast<std::size_t>(column)] > 1 &&
-                                       yMap.draws(low) && yMap.draws(high) &&
+                    const double leftEdge = edgeAt(column);
+                    const double rightEdge = edgeAt(column + 1);
+                    const ColumnScratch::Column& slot =
+                        columnsBuf.columns[static_cast<std::size_t>(column)];
+                    const double low = slot.low;
+                    const double high = slot.high;
+                    const bool tall = slot.count > 1 && yMap.draws(low) && yMap.draws(high) &&
                                        std::abs(yMap.fractionOf(high) - yMap.fractionOf(low)) * h >=
                                            1.0;
                     if (tall) {

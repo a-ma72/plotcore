@@ -568,6 +568,13 @@ PlotLine Plot::drawLine(int line) const
     if (!held.finished || held.pyramid.empty()) {
         return drawn;
     }
+    // projectLine would otherwise walk every x of a time base to learn what
+    // orderOf already recorded when the times were set.
+    if (const std::vector<double>* time = timeOf(held)) {
+        const bool sorted = time == &held.time ? held.timeSorted : timeSorted_;
+        const bool ascending = time == &held.time ? held.timeAscending : timeAscending_;
+        drawn.xOrdered = sorted && ascending;
+    }
     auto& line_ = const_cast<Line&>(held);
     if (foldLog(line_)) {
         drawn.values = held.foldValues.data();
@@ -602,6 +609,11 @@ PlotLine Plot::drawLine(int line) const
                 held.window->bucket == 1 ? 1.0 : static_cast<double>(held.window->bucket) / 2.0;
             if (!held.closerAt.empty() && held.closerAt.size() == held.closer.size()) {
                 drawn.positions = held.closerAt.data();
+                // Pyramid element positions only ever run forward; with no time
+                // base the axis is affine in them.
+                if (!drawn.xOrdered.has_value()) {
+                    drawn.xOrdered = indexStep_ > 0.0;
+                }
             }
             drawn.summarised = held.window->bucket > 1;
             return drawn;
@@ -612,6 +624,9 @@ PlotLine Plot::drawLine(int line) const
     drawn.positionStep = held.step;
     if (!held.summaryAt.empty() && held.summaryAt.size() == held.summary.size()) {
         drawn.positions = held.summaryAt.data();
+        if (!drawn.xOrdered.has_value()) {
+            drawn.xOrdered = indexStep_ > 0.0;
+        }
     }
     drawn.summarised = held.stride > 1;
     return drawn;
