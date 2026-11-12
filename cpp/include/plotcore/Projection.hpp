@@ -64,6 +64,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 
 #include <optional>
 #include <span>
@@ -213,11 +214,12 @@ struct PlotLine
 
 /// Working memory for `projectLine`'s device-pixel columns.
 ///
-/// Grown to the pane, overwritten each use, and meant to be reused across the
-/// lines of a frame -- one allocation that then only grows with the widest
-/// pane, rather than four fresh vectors per line per compose. A host that
-/// draws many lines (Figure) keeps one; callers that omit it share a
-/// thread-local of the same shape.
+/// Grown to the pane and kept. A pan by whole columns moves the samples with
+/// the column they were already in, so the columns that stay on screen are
+/// slid across this buffer and only the strip that entered is walked.
+/// Figure keeps one scratch per line: the lines of one frame would otherwise
+/// overwrite each other, and the next pan would have nothing left to slide.
+/// Callers that omit it share a thread-local of the same shape.
 struct ColumnScratch
 {
     struct Column
@@ -235,8 +237,47 @@ struct ColumnScratch
     /// sample once the axis is logarithmic. The golden digest is this loop.
     std::vector<double> edges;
 
+    /// How many columns the last `projectLine` walked. The ones a pan slid
+    /// across are not in this count.
+    int scanned = 0;
+
+    /// Slide columns across calls. Off unless the owner keeps this scratch
+    /// for one line: the shared thread-local one is used by callers that
+    /// rewrite a sample between projections, and sliding those columns would
+    /// draw the sample as it was.
+    bool retain = false;
+
+    /// The grid `columns` were filled for. The next projection slides them
+    /// when its grid is this one moved by whole columns.
+    struct Kept
+    {
+        bool valid = false;
+        const double* values = nullptr;
+        const double* positions = nullptr;
+        double first = 0.0;
+        double last = 0.0;
+        std::int64_t count = 0;
+        double x0 = 0.0;
+        double step = 0.0;
+        /// Width of one column in the grid's own parameter: data x, or the
+        /// log of it.
+        double width = 0.0;
+        /// `k0`, or the log grid's `edgeK0`. An integer.
+        double origin = 0.0;
+        std::int64_t columns = 0;
+        bool logarithmic = false;
+        bool yLog = false;
+        bool located = false;
+    };
+    Kept kept{};
+
     /// Ensure room for `n` columns and reset each to empty (NaN lows/highs).
     void prepare(std::size_t n);
+
+    /// Slide the first `n` columns by `shift` steps. Positive drops columns
+    /// on the left, which is a window that moved right. The slots that enter
+    /// are reset to empty.
+    void shiftBy(std::int64_t shift, std::size_t n);
 };
 
 /// One closer look at a line: an aligned run of it, to be summarised at a

@@ -11,9 +11,12 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
+#include <QRegion>
 #include <QWheelEvent>
 
+#include <algorithm>
 #include <cmath>
+#include <cstdlib>
 
 namespace plotcore::qt {
 namespace {
@@ -175,7 +178,18 @@ void PlotWidget::paintEvent(QPaintEvent*)
     figure_.setSize(width(), height(), devicePixelRatioF());
     scene_ = figure_.scene();
     QPainter painter(this);
-    paintScene(painter, scene_);
+    // The grid is a handful of marks. The lines are what a pan can copy:
+    // whole device pixels slide the image, and only the strip that entered
+    // is stroked.
+    paintChrome(painter, scene_);
+    if (!scrollLines(scene_)) {
+        storeLines(scene_);
+    }
+    painter.drawImage(QPointF(0, 0), lines_);
+    const QRectF area(scene_.area.x, scene_.area.y, scene_.area.width, scene_.area.height);
+    for (const Mark& mark : scene_.over) {
+        paintMark(painter, mark, area);
+    }
 }
 
 QImage PlotWidget::render(QSize size, double scale)
@@ -298,7 +312,46 @@ void PlotWidget::paintMark(QPainter& painter, const Mark& mark, const QRectF& ar
     painter.restore();
 }
 
-void PlotWidget::paintScene(QPainter& painter, const Scene& scene) const
+namespace {
+
+bool segmentHits(const QRectF& rect, double x0, double y0, double x1, double y1)
+{
+    return !(std::max(x0, x1) < rect.left() || std::min(x0, x1) > rect.right() ||
+             std::max(y0, y1) < rect.top() || std::min(y0, y1) > rect.bottom());
+}
+
+bool samePlace(const Point& a, const Point& b)
+{
+    return std::abs(a.x() - b.x()) <= 1e-4 && std::abs(a.y() - b.y()) <= 1e-4;
+}
+
+std::vector<Point> gathered(const std::vector<std::vector<Point>>& runs)
+{
+    std::vector<Point> out;
+    for (const std::vector<Point>& run : runs) {
+        out.insert(out.end(), run.begin(), run.end());
+    }
+    return out;
+}
+
+std::vector<Point> insideOverlap(std::vector<Point> points, double left, double right, double top,
+                                 double bottom)
+{
+    points.erase(std::remove_if(points.begin(), points.end(),
+                                [&](const Point& point) {
+                                    return !(point.x() > left && point.x() < right &&
+                                             point.y() > top && point.y() < bottom);
+                                }),
+                 points.end());
+    std::sort(points.begin(), points.end(), [](const Point& a, const Point& b) {
+        return a.x() < b.x() || (a.x() == b.x() && a.y() < b.y());
+    });
+    return points;
+}
+
+} // namespace
+
+void PlotWidget::paintChrome(QPainter& painter, const Scene& scene) const
 {
     painter.setRenderHint(QPainter::Antialiasing, true);
     if (scene.ground.alpha > 0.0) {
@@ -308,11 +361,21 @@ void PlotWidget::paintScene(QPainter& painter, const Scene& scene) const
     for (const Mark& mark : scene.under) {
         paintMark(painter, mark, area);
     }
+}
 
-    // The lines, inside the pane: a run drawn past either end is clipped here
-    // as the viewer's item clips it.
+void PlotWidget::paintLines(QPainter& painter, const Scene& scene,
+                            const std::vector<QRectF>* strips) const
+{
+    const QRectF area(scene.area.x, scene.area.y, scene.area.width, scene.area.height);
     painter.save();
     painter.setClipRect(area);
+    if (strips != nullptr && !strips->empty()) {
+        QRegion region;
+        for (const QRectF& rect : *strips) {
+            region = region.united(QRegion(rect.toAlignedRect()));
+        }
+        painter.setClipRegion(region, Qt::IntersectClip);
+    }
     painter.setRenderHint(QPainter::Antialiasing, true);
     for (const DrawnLine& line : scene.lines) {
         QPen pen(qcolor(line.colour), line.width);
@@ -321,28 +384,276 @@ void PlotWidget::paintScene(QPainter& painter, const Scene& scene) const
         painter.setPen(pen);
         painter.setBrush(Qt::NoBrush);
         for (const std::vector<Point>& run : line.runs) {
-            if (run.size() == 1) {
-                painter.drawPoint(qpoint(run.front()));
-                continue;
+            std::vector<std::vector<Point>> pieces;
+            if (strips == nullptr || strips->empty()) {
+                pieces.push_back(run);
             }
-            QPolygonF polygon;
-            polygon.reserve(static_cast<qsizetype>(run.size()));
-            for (const Point& point : run) {
-                polygon.append(qpoint(point));
+            else if (!run.empty()) {
+                std::vector<char> need(run.size(), 0);
+                for (std::size_t i = 0; i < run.size(); ++i) {
+                    for (const QRectF& rect : *strips) {
+                        if (rect.contains(qpoint(run[i])) ||
+                            (i + 1 < run.size() &&
+                             segmentHits(rect, run[i].x(), run[i].y(), run[i + 1].x(),
+                                         run[i + 1].y()))) {
+                            need[i] = 1;
+                            if (i + 1 < run.size()) {
+                                need[i + 1] = 1;
+                            }
+                        }
+                    }
+                }
+                std::size_t start = 0;
+                bool open = false;
+                for (std::size_t i = 0; i < need.size(); ++i) {
+                    if (need[i] && !open) {
+                        start = i;
+                        open = true;
+                    }
+                    else if (!need[i] && open) {
+                        pieces.emplace_back(run.begin() + static_cast<std::ptrdiff_t>(start),
+                                            run.begin() + static_cast<std::ptrdiff_t>(i));
+                        open = false;
+                    }
+                }
+                if (open) {
+                        pieces.emplace_back(run.begin() + static_cast<std::ptrdiff_t>(start),
+                                            run.end());
+                }
             }
-            painter.drawPolyline(polygon);
+            for (const std::vector<Point>& piece : pieces) {
+                if (piece.size() == 1) {
+                    painter.drawPoint(qpoint(piece.front()));
+                    continue;
+                }
+                if (piece.empty()) {
+                    continue;
+                }
+                QPolygonF polygon;
+                polygon.reserve(static_cast<qsizetype>(piece.size()));
+                for (const Point& point : piece) {
+                    polygon.append(qpoint(point));
+                }
+                painter.drawPolyline(polygon);
+            }
         }
         if (!line.markers.empty()) {
             painter.setPen(Qt::NoPen);
             painter.setBrush(qcolor(line.colour));
             for (const Point& point : line.markers) {
+                if (strips != nullptr &&
+                    std::none_of(strips->begin(), strips->end(), [&](const QRectF& rect) {
+                        return rect.contains(qpoint(point));
+                    })) {
+                    continue;
+                }
                 painter.drawEllipse(qpoint(point), line.markerRadius, line.markerRadius);
             }
             painter.setBrush(Qt::NoBrush);
         }
     }
     painter.restore();
+}
 
+bool PlotWidget::linesMatch(const Scene& scene) const
+{
+    if (!linesHeld_ || linesScene_.width != scene.width || linesScene_.height != scene.height ||
+        linesScene_.x != scene.x || linesScene_.y != scene.y || linesScene_.area.x != scene.area.x ||
+        linesScene_.area.y != scene.area.y || linesScene_.area.width != scene.area.width ||
+        linesScene_.area.height != scene.area.height ||
+        linesScene_.lines.size() != scene.lines.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < scene.lines.size(); ++i) {
+        const DrawnLine& old = linesScene_.lines[i];
+        const DrawnLine& now = scene.lines[i];
+        if (old.colour != now.colour || old.width != now.width ||
+            old.markerRadius != now.markerRadius || old.runs.size() != now.runs.size() ||
+            old.markers.size() != now.markers.size()) {
+            return false;
+        }
+        for (std::size_t run = 0; run < old.runs.size(); ++run) {
+            if (old.runs[run].size() != now.runs[run].size()) {
+                return false;
+            }
+            for (std::size_t point = 0; point < old.runs[run].size(); ++point) {
+                if (!samePlace(old.runs[run][point], now.runs[run][point])) {
+                    return false;
+                }
+            }
+        }
+    }
+    return true;
+}
+
+bool PlotWidget::linesTranslated(const Scene& scene, double sx, double sy) const
+{
+    if (linesScene_.lines.size() != scene.lines.size()) {
+        return false;
+    }
+    const double left = scene.area.x + std::max(sx, 0.0) + 0.25;
+    const double right = scene.area.x + scene.area.width + std::min(sx, 0.0) - 0.25;
+    const double top = scene.area.y + std::max(sy, 0.0) + 0.25;
+    const double bottom = scene.area.y + scene.area.height + std::min(sy, 0.0) - 0.25;
+    if (right - left < 1.0 || bottom - top < 1.0) {
+        return false;
+    }
+    for (std::size_t i = 0; i < scene.lines.size(); ++i) {
+        const DrawnLine& old = linesScene_.lines[i];
+        const DrawnLine& now = scene.lines[i];
+        if (old.colour != now.colour || old.width != now.width ||
+            old.markerRadius != now.markerRadius) {
+            return false;
+        }
+        const auto agree = [&](std::vector<Point> was, const std::vector<Point>& is) {
+            for (Point& point : was) {
+                point = Point(point.x() + sx, point.y() + sy);
+            }
+            const std::vector<Point> kept = insideOverlap(std::move(was), left, right, top, bottom);
+            const std::vector<Point> have = insideOverlap(is, left, right, top, bottom);
+            if (kept.size() != have.size()) {
+                return false;
+            }
+            for (std::size_t p = 0; p < kept.size(); ++p) {
+                if (!samePlace(kept[p], have[p])) {
+                    return false;
+                }
+            }
+            return true;
+        };
+        if (!agree(gathered(old.runs), gathered(now.runs)) ||
+            !agree(old.markers, now.markers)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool PlotWidget::scrollLines(const Scene& scene)
+{
+    if (!linesHeld_ || lines_.isNull() || linesRatio_ != devicePixelRatioF() ||
+        figure_.settings().flipped) {
+        return false;
+    }
+    if (linesScene_.width != scene.width || linesScene_.height != scene.height ||
+        linesScene_.area.width != scene.area.width || linesScene_.area.height != scene.area.height ||
+        linesScene_.area.x != scene.area.x || linesScene_.area.y != scene.area.y) {
+        return false;
+    }
+    const double xSpan = scene.x.high - scene.x.low;
+    const double ySpan = scene.y.high - scene.y.low;
+    const double oldX = linesScene_.x.high - linesScene_.x.low;
+    const double oldY = linesScene_.y.high - linesScene_.y.low;
+    if (!(xSpan > 0.0) || !(ySpan > 0.0)) {
+        return false;
+    }
+    if (std::abs(oldX - xSpan) > 1e-9 * std::max(1.0, std::abs(xSpan)) ||
+        std::abs(oldY - ySpan) > 1e-9 * std::max(1.0, std::abs(ySpan))) {
+        return false;
+    }
+    const double sx = (linesScene_.x.low - scene.x.low) / xSpan * scene.area.width;
+    const double sy = (scene.y.low - linesScene_.y.low) / ySpan * scene.area.height;
+    const double sxd = sx * linesRatio_;
+    const double syd = sy * linesRatio_;
+    const int rx = static_cast<int>(std::lround(sxd));
+    const int ry = static_cast<int>(std::lround(syd));
+    if (std::abs(sxd - rx) > 1e-3 || std::abs(syd - ry) > 1e-3 || std::abs(rx) >= lines_.width() ||
+        std::abs(ry) >= lines_.height()) {
+        return false;
+    }
+    if (rx == 0 && ry == 0) {
+        return linesMatch(scene);
+    }
+    if (!linesTranslated(scene, sx, sy)) {
+        return false;
+    }
+
+    QImage moved(lines_.size(), QImage::Format_ARGB32_Premultiplied);
+    moved.fill(Qt::transparent);
+    QImage source = lines_;
+    source.setDevicePixelRatio(1.0);
+    const QRectF pane(scene.area.x * linesRatio_, scene.area.y * linesRatio_,
+                      scene.area.width * linesRatio_, scene.area.height * linesRatio_);
+    const int seam = std::max(2, static_cast<int>(std::ceil(linesRatio_)));
+    std::vector<QRectF> device;
+    if (rx > 0) {
+        device.emplace_back(pane.x(), pane.y(), rx + seam, pane.height());
+    }
+    else if (rx < 0) {
+        device.emplace_back(pane.right() + rx - seam, pane.y(), -rx + seam, pane.height());
+    }
+    if (ry > 0) {
+        device.emplace_back(pane.x(), pane.y(), pane.width(), ry + seam);
+    }
+    else if (ry < 0) {
+        device.emplace_back(pane.x(), pane.bottom() + ry - seam, pane.width(), -ry + seam);
+    }
+    {
+        QPainter painter(&moved);
+        // Whole pixels strictly inside the pane. The shifted rectangle hangs a
+        // column into the gutter, over the axis, and a fraction off a pixel
+        // makes the copy a scale.
+        const QRect panePx(static_cast<int>(std::ceil(pane.left() - 1e-6)),
+                           static_cast<int>(std::ceil(pane.top() - 1e-6)),
+                           static_cast<int>(std::floor(pane.right() + 1e-6) -
+                                            std::ceil(pane.left() - 1e-6)),
+                           static_cast<int>(std::floor(pane.bottom() + 1e-6) -
+                                            std::ceil(pane.top() - 1e-6)));
+        const QRect src =
+            panePx.adjusted(std::max(-rx, 0), std::max(-ry, 0), -std::max(rx, 0), -std::max(ry, 0));
+        const QRect dst = panePx.adjusted(std::max(rx, 0), std::max(ry, 0), -std::max(-rx, 0),
+                                          -std::max(-ry, 0));
+        if (src.size() != dst.size() || src.width() <= 0 || src.height() <= 0) {
+            return false;
+        }
+        painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
+        painter.setClipRect(panePx);
+        painter.drawImage(dst, source, src);
+        painter.setClipping(false);
+        painter.setCompositionMode(QPainter::CompositionMode_Source);
+        for (const QRectF& rect : device) {
+            painter.fillRect(rect, Qt::transparent);
+        }
+        painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
+        painter.scale(linesRatio_, linesRatio_);
+        std::vector<QRectF> logical;
+        logical.reserve(device.size());
+        for (const QRectF& rect : device) {
+            logical.emplace_back(rect.x() / linesRatio_, rect.y() / linesRatio_,
+                                 rect.width() / linesRatio_, rect.height() / linesRatio_);
+        }
+        paintLines(painter, scene, &logical);
+    }
+    moved.setDevicePixelRatio(linesRatio_);
+    lines_ = moved;
+    linesScene_ = scene;
+    return true;
+}
+
+void PlotWidget::storeLines(const Scene& scene)
+{
+    const double ratio = devicePixelRatioF();
+    QImage image(std::max(1, static_cast<int>(std::lround(scene.width * ratio))),
+                 std::max(1, static_cast<int>(std::lround(scene.height * ratio))),
+                 QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+    {
+        QPainter painter(&image);
+        painter.scale(ratio, ratio);
+        paintLines(painter, scene);
+    }
+    image.setDevicePixelRatio(ratio);
+    lines_ = image;
+    linesScene_ = scene;
+    linesRatio_ = ratio;
+    linesHeld_ = true;
+}
+
+void PlotWidget::paintScene(QPainter& painter, const Scene& scene) const
+{
+    paintChrome(painter, scene);
+    paintLines(painter, scene);
+    const QRectF area(scene.area.x, scene.area.y, scene.area.width, scene.area.height);
     for (const Mark& mark : scene.over) {
         paintMark(painter, mark, area);
     }

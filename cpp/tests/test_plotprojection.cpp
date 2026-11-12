@@ -2223,3 +2223,56 @@ TEST_CASE("a line reaches the last time of its time base", "[plot][positions]")
     longer.positionStart = 5.0;
     CHECK(std::isnan(plotcore::xOf(longer, axis, 999)));
 }
+
+TEST_CASE("a pan by whole columns reuses the columns it already filled", "[plot]")
+{
+    // The grid is anchored at zero, one column a device pixel. Moving the
+    // window by that step keeps every sample that stays on screen in the
+    // column it was in, so the fold of those columns is the one already done.
+    std::vector<double> values(100000);
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        values[i] = std::sin(static_cast<double>(i) * 0.01) + ((i % 250) == 0 ? 4.0 : 0.0);
+    }
+    const plotcore::PlotLine line = lineOver(values);
+    const plotcore::PlotView first = paneOver(0.0, 99999.0, -2.0, 6.0);
+    plotcore::ColumnScratch scratch;
+    scratch.retain = true;
+    Projected kept;
+    plotcore::projectLine(line, plotcore::PlotAxis{}, first, kept.points, kept.runs, &scratch);
+    REQUIRE(scratch.scanned == 1000);
+    REQUIRE_FALSE(kept.points.empty());
+
+    const double column = (first.xMax - first.xMin) / 1000.0;
+    const plotcore::PlotView panned =
+        paneOver(first.xMin + column, first.xMax + column, first.yMin, first.yMax);
+    Projected slid;
+    plotcore::projectLine(line, plotcore::PlotAxis{}, panned, slid.points, slid.runs, &scratch);
+    CHECK(scratch.scanned == 1);
+
+    Projected fresh;
+    plotcore::projectLine(line, plotcore::PlotAxis{}, panned, fresh.points, fresh.runs);
+    REQUIRE(slid.points.size() == fresh.points.size());
+    REQUIRE(slid.runs.size() == fresh.runs.size());
+    for (std::size_t i = 0; i < slid.points.size(); ++i) {
+        CHECK(slid.points[i].x() == fresh.points[i].x());
+        CHECK(slid.points[i].y() == fresh.points[i].y());
+    }
+    for (std::size_t i = 0; i < slid.runs.size(); ++i) {
+        CHECK(slid.runs[i].first == fresh.runs[i].first);
+        CHECK(slid.runs[i].count == fresh.runs[i].count);
+    }
+
+    // A pan that does not cross a column walks nothing.
+    const plotcore::PlotView held =
+        paneOver(first.xMin + column * 1.2, first.xMax + column * 1.2, first.yMin, first.yMax);
+    Projected still;
+    plotcore::projectLine(line, plotcore::PlotAxis{}, held, still.points, still.runs, &scratch);
+    CHECK(scratch.scanned == 0);
+    Projected heldFresh;
+    plotcore::projectLine(line, plotcore::PlotAxis{}, held, heldFresh.points, heldFresh.runs);
+    REQUIRE(still.points.size() == heldFresh.points.size());
+    for (std::size_t i = 0; i < still.points.size(); ++i) {
+        CHECK(still.points[i].x() == heldFresh.points[i].x());
+        CHECK(still.points[i].y() == heldFresh.points[i].y());
+    }
+}

@@ -151,6 +151,111 @@ TEST_CASE("a line copied in is drawn as its own elements, at every zoom", "[plot
     }
 }
 
+TEST_CASE("panning a figure walks no line's extent again", "[plot]")
+{
+    // Around zero throughout, because a line that stays above it answers
+    // smallestPositive() from its top bucket and this would pass over the walk.
+    const std::size_t count = 200000;
+    std::vector<double> values(count);
+    std::vector<double> time(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        values[i] = i % 2 == 0 ? 1.0 : -1.0;
+        time[i] = 1000.0 + static_cast<double>(i);
+    }
+
+    const auto walksOfAPan = [&](bool timed) {
+        Figure figure;
+        figure.setSize(800.0, 400.0);
+        (void)figure.plot().addLine(values.data(), static_cast<long long>(count));
+        if (timed) {
+            figure.plot().setTime(time.data(), static_cast<long long>(count));
+        }
+        (void)figure.scene();
+        const long long before = figure.plot().wholeLineWalks();
+        REQUIRE(before > 0);
+        const double x0 = figure.camera().viewMinX();
+        const double span = (figure.camera().viewMaxX() - x0) / 4.0;
+        const double y0 = figure.camera().viewMinY();
+        const double y1 = figure.camera().viewMaxY();
+        for (int frame = 0; frame < 20; ++frame) {
+            const double at = x0 + span + frame * 10.0;
+            figure.setViewRange(at, at + span, y0, y1);
+            (void)figure.scene();
+        }
+        return figure.plot().wholeLineWalks() - before;
+    };
+    REQUIRE(walksOfAPan(false) == 0);
+    REQUIRE(walksOfAPan(true) == 0);
+}
+
+TEST_CASE("what a line spans is worked out again when what it was worked out from changes",
+          "[plot]")
+{
+    const std::vector<double> values = {-3.0, 0.25, 4.0, -1.0, 2.0, 0.5};
+    const auto count = static_cast<long long>(values.size());
+    const std::vector<double> time = {10.0, 11.0, 12.0, 13.0, 14.0, 15.0};
+    const std::vector<double> own = {-20.0, -10.0, 5.0, 6.0, 7.0, 8.0};
+    Plot plot;
+    const int line = plot.addLine(values.data(), count);
+
+    SECTION("the values are kept, and are the same answer")
+    {
+        const LineExtent first = plot.extent(line);
+        const long long walks = plot.wholeLineWalks();
+        const LineExtent second = plot.extent(line);
+        REQUIRE(plot.wholeLineWalks() == walks);
+        REQUIRE(second.minimum == first.minimum);
+        REQUIRE(second.maximum == first.maximum);
+        REQUIRE(second.positiveMinimum == first.positiveMinimum);
+    }
+    SECTION("a stated index axis moves the span")
+    {
+        REQUIRE(plot.xExtent(line).high == 5.0);
+        plot.setIndexAxis(100.0, 2.0);
+        REQUIRE(plot.xExtent(line).low == 100.0);
+        REQUIRE(plot.xExtent(line).high == 110.0);
+    }
+    SECTION("a shared time base replaces the span, and clearing it puts the index back")
+    {
+        REQUIRE(plot.xExtent(line).high == 5.0);
+        plot.setTime(time.data(), count);
+        REQUIRE(plot.xExtent(line).low == 10.0);
+        REQUIRE(plot.xExtent(line).high == 15.0);
+        REQUIRE(plot.xPositiveMinimum(line) == 10.0);
+        plot.setTime(nullptr, 0);
+        REQUIRE(plot.xExtent(line).high == 5.0);
+    }
+    SECTION("a line's own time base beats the shared one it was kept from")
+    {
+        plot.setTime(time.data(), count);
+        REQUIRE(plot.xPositiveMinimum(line) == 10.0);
+        plot.setLineTime(line, own.data(), count);
+        REQUIRE(plot.xExtent(line).low == -20.0);
+        REQUIRE(plot.xExtent(line).high == 8.0);
+        REQUIRE(plot.xPositiveMinimum(line) == 5.0);
+    }
+    SECTION("a line held coarser answers from what it now holds")
+    {
+        // A bucket that straddles zero cannot be opened, so a base coarser
+        // than one answers the smallest above zero with that bucket's largest.
+        const std::vector<double> long_ = [] {
+            std::vector<double> v(1 << 18);
+            for (std::size_t i = 0; i < v.size(); ++i) {
+                v[i] = i % 2 == 0 ? 1.0 + static_cast<double>(i) * 1e-3 : -1.0;
+            }
+            v[1000] = 0.001; // the true smallest, beside a -1 in every bucket
+            return v;
+        }();
+        Plot budgeted;
+        const int held = budgeted.addLine(long_.data(), static_cast<long long>(long_.size()));
+        REQUIRE(budgeted.baseBucket(held) == 1);
+        REQUIRE(budgeted.extent(held).positiveMinimum == 0.001);
+        budgeted.setBudgetBytes(1 << 16);
+        REQUIRE(budgeted.baseBucket(held) > 1);
+        REQUIRE(budgeted.extent(held).positiveMinimum > 0.001);
+    }
+}
+
 TEST_CASE("a line streamed in pieces is the line copied in whole", "[plot]")
 {
     const std::vector<double> values = walk(300001);
@@ -437,6 +542,52 @@ TEST_CASE("a drag pans, and may leave the data but not lose it", "[figure]")
     figure.release(cx + 10.0 * a.width, cy, Button::Left, {});
     const Scene far = figure.scene();
     REQUIRE(far.x.high == Approx(before.x.low + 0.25 * span));
+}
+
+TEST_CASE("a pan steps by whole device columns and holds the fraction", "[figure]")
+{
+    // The column grid is one device pixel, anchored at zero. A drag of part
+    // of a column used to move the window by that fraction, so the edges took
+    // different samples and the region a blit copies was no longer the
+    // picture on screen. The fraction is held until it crosses a column.
+    Figure figure = figureOf({ramp(1000, 0.0, 1.0)});
+    const Scene before = figure.scene();
+    const PaneRect a = before.area;
+    const double span = before.x.high - before.x.low;
+    const double columns = static_cast<double>(std::llround(a.width));
+    const double columnPx = a.width / columns;
+    const double column = span / columns;
+    const double cx = a.x + a.width / 2.0;
+    const double cy = a.y + a.height / 2.0;
+
+    figure.press(cx, cy, Button::Left, {});
+    figure.move(cx + 0.25 * columnPx, cy, {});
+    REQUIRE(figure.scene().x.low == Approx(before.x.low));
+    REQUIRE(figure.scene().y.low == Approx(before.y.low));
+
+    // The quarter already held, plus one column, steps once. The content
+    // follows the pointer, so the window moves the other way.
+    figure.move(cx + 1.25 * columnPx, cy, {});
+    const Scene stepped = figure.scene();
+    REQUIRE(stepped.x.low == Approx(before.x.low - column));
+    REQUIRE(stepped.y.low == Approx(before.y.low));
+    figure.release(cx + 1.25 * columnPx, cy, Button::Left, {});
+
+    // A new drag does not inherit the fraction. At two device pixels per
+    // logical pixel, one logical pixel is two columns.
+    figure.setSize(800.0, 500.0, 2.0);
+    const Scene hidpi = figure.scene();
+    const PaneRect b = hidpi.area;
+    const double spanX = hidpi.x.high - hidpi.x.low;
+    const double deviceColumns = static_cast<double>(std::llround(b.width * 2.0));
+    const double devicePx = b.width / deviceColumns;
+    const double hx = b.x + b.width / 2.0;
+    const double hy = b.y + b.height / 2.0;
+    figure.press(hx, hy, Button::Left, {});
+    figure.move(hx + 0.25 * devicePx, hy, {});
+    REQUIRE(figure.scene().x.low == Approx(hidpi.x.low));
+    figure.move(hx + 1.25 * devicePx, hy, {});
+    REQUIRE(figure.scene().x.low == Approx(hidpi.x.low - spanX / deviceColumns));
 }
 
 TEST_CASE("a right drag zooms to the band it drew, and a slip is not a band", "[figure]")

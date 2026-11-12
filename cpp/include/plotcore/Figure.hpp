@@ -694,8 +694,9 @@ private:
     double width_ = 640.0;
     double height_ = 400.0;
     double pixelRatio_ = 1.0;
-    /// Column mins/maxes for projectLine, reused across every line of a compose.
-    mutable ColumnScratch columnScratch_;
+    /// Column mins/maxes for projectLine, one buffer per drawn line so a pan
+    /// can slide the columns that line already holds.
+    mutable std::vector<ColumnScratch> columnKept_;
 
     // What a gesture in progress is doing.
     enum class Drag
@@ -716,6 +717,9 @@ private:
     /// choice, from the modifiers of the latest move.
     ZoomAxes bandAxes_ = ZoomAxes::Both;
     bool controlClick_ = false;
+    /// Pointer movement not yet a whole device column, in logical pixels.
+    double panGrainX_ = 0.0;
+    double panGrainY_ = 0.0;
     std::optional<Point> pointer_;
 };
 

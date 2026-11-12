@@ -292,6 +292,42 @@ void ColumnScratch::prepare(std::size_t n)
     }
 }
 
+void ColumnScratch::shiftBy(std::int64_t shift, std::size_t n)
+{
+    if (shift == 0 || n == 0 || columns.size() < n) {
+        return;
+    }
+    const double quiet = std::numeric_limits<double>::quiet_NaN();
+    const Column blank{quiet, quiet, 0};
+    if (shift > 0) {
+        const auto s = static_cast<std::size_t>(shift);
+        if (s >= n) {
+            return;
+        }
+        // new[i] is old[i + shift]: the window moved right, so what was one
+        // column to the right is now here. Reading upward, so a slot is
+        // copied before it is overwritten.
+        for (std::size_t i = 0; i + s < n; ++i) {
+            columns[i] = columns[i + s];
+        }
+        for (std::size_t i = n - s; i < n; ++i) {
+            columns[i] = blank;
+        }
+    }
+    else {
+        const auto s = static_cast<std::size_t>(-shift);
+        if (s >= n) {
+            return;
+        }
+        for (std::size_t i = n; i-- > s;) {
+            columns[i] = columns[i - s];
+        }
+        for (std::size_t i = 0; i < s; ++i) {
+            columns[i] = blank;
+        }
+    }
+}
+
 namespace {
 
 ColumnScratch& columnScratchOf(ColumnScratch* scratch)
@@ -577,10 +613,16 @@ PlotProjected projectLine(const PlotLine& line, const PlotAxis& axis, const Plot
         bool logEdges = false;
         double edgeK0 = 0.0;
         double edgeOrigin = 0.0;
+        // The grid's step and where column 0 sits. A later pan with the same
+        // step and an origin an integer of columns away holds the same samples
+        // in the columns that remain, which is what lets those columns be slid
+        // instead of walked again.
+        double gridWidth = width;
+        double origin = 0.0;
         if (edgesOk && !view.xLog) {
-            const double k0 = std::floor(xLowBound / width + 0.5);
+            origin = std::floor(xLowBound / width + 0.5);
             for (std::int64_t i = 0; i <= columns; ++i) {
-                edges[static_cast<std::size_t>(i)] = (k0 + static_cast<double>(i)) * width;
+                edges[static_cast<std::size_t>(i)] = (origin + static_cast<double>(i)) * width;
             }
         }
         else if (edgesOk) {
@@ -590,7 +632,9 @@ PlotProjected projectLine(const PlotLine& line, const PlotAxis& axis, const Plot
             edgesOk = logWidth > 0.0 && std::isfinite(logWidth);
             if (edgesOk) {
                 logEdges = true;
+                gridWidth = logWidth;
                 edgeK0 = std::floor(p0 / logWidth + 0.5);
+                origin = edgeK0;
                 edgeOrigin = p0 / logWidth;
                 for (std::int64_t i = 0; i <= columns; ++i) {
                     edges[static_cast<std::size_t>(i)] =
@@ -699,9 +743,53 @@ PlotProjected projectLine(const PlotLine& line, const PlotAxis& axis, const Plot
                 }
             };
 
-            columnsBuf.prepare(static_cast<std::size_t>(columns));
+            // A summarised fold is rewritten into the same buffer as the
+            // window moves, so its columns are not the ones a pan can slide.
+            // The samples of a base of one are.
+            const auto near = [](double a, double b) {
+                const double scale = std::max(1.0, std::max(std::abs(a), std::abs(b)));
+                return std::abs(a - b) <= 1e-9 * scale;
+            };
+            const ColumnScratch::Kept& held = columnsBuf.kept;
+            const bool sameLine = columnsBuf.retain && held.valid && !line.summarised &&
+                                  held.values == line.values &&
+                                  held.positions == line.positions && held.count == count &&
+                                  held.located == located && held.logarithmic == logEdges &&
+                                  held.yLog == yMap.logarithmic && held.columns == columns &&
+                                  columnsBuf.columns.size() >= static_cast<std::size_t>(columns) &&
+                                  near(held.width, gridWidth) && near(held.x0, x0) &&
+                                  near(held.step, dx) && near(held.first, line.values[0]) &&
+                                  near(held.last, line.values[count - 1]);
+            bool reused = false;
+            std::int64_t fillFrom = 0;
+            std::int64_t fillTo = columns;
+            if (sameLine) {
+                const double shifted = origin - held.origin;
+                const auto shift = static_cast<std::int64_t>(std::llround(shifted));
+                if (std::abs(shifted - static_cast<double>(shift)) <= 1e-6 &&
+                    std::abs(shift) < columns) {
+                    if (shift != 0) {
+                        columnsBuf.shiftBy(shift, static_cast<std::size_t>(columns));
+                    }
+                    if (shift > 0) {
+                        fillFrom = columns - shift;
+                    }
+                    else if (shift < 0) {
+                        fillTo = -shift;
+                    }
+                    else {
+                        fillTo = 0;
+                    }
+                    reused = true;
+                }
+            }
+            if (!reused) {
+                columnsBuf.prepare(static_cast<std::size_t>(columns));
+                fillFrom = 0;
+                fillTo = columns;
+            }
             int most = 0;
-            for (std::int64_t column = 0; column < columns; ++column) {
+            for (std::int64_t column = fillFrom; column < fillTo; ++column) {
                 const double leftEdge = edges[static_cast<std::size_t>(column)];
                 const double rightEdge = edges[static_cast<std::size_t>(column + 1)];
                 std::int64_t start = 0;
@@ -743,7 +831,30 @@ PlotProjected projectLine(const PlotLine& line, const PlotAxis& axis, const Plot
                 if (const std::optional<double> y = chordAt(rightEdge)) {
                     include(slot.low, slot.high, *y);
                 }
-                most = std::max(most, slot.count);
+            }
+            for (std::int64_t column = 0; column < columns; ++column) {
+                most = std::max(most, columnsBuf.columns[static_cast<std::size_t>(column)].count);
+            }
+            columnsBuf.scanned = static_cast<int>(fillTo - fillFrom);
+            if (columnsBuf.retain && !line.summarised) {
+                ColumnScratch::Kept& next = columnsBuf.kept;
+                next.valid = true;
+                next.values = line.values;
+                next.positions = line.positions;
+                next.first = line.values[0];
+                next.last = line.values[count - 1];
+                next.count = count;
+                next.x0 = x0;
+                next.step = dx;
+                next.width = gridWidth;
+                next.origin = origin;
+                next.columns = columns;
+                next.logarithmic = logEdges;
+                next.yLog = yMap.logarithmic;
+                next.located = located;
+            }
+            else {
+                columnsBuf.kept.valid = false;
             }
             if (most > 1) {
                 bool linked = false;

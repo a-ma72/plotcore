@@ -15,12 +15,13 @@ goes or what a gesture does.
 from __future__ import annotations
 
 import ctypes
-from typing import Dict, Optional
+import math
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
 try:
-    from PyQt6.QtCore import QPointF, QRectF, QSize, Qt, pyqtSignal
+    from PyQt6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt, pyqtSignal
     from PyQt6.QtGui import (
         QColor,
         QCursor,
@@ -30,6 +31,7 @@ try:
         QPainter,
         QPen,
         QPolygonF,
+        QRegion,
     )
     from PyQt6.QtWidgets import QApplication, QWidget
 except ImportError as error:  # pragma: no cover -- said once, plainly
@@ -63,6 +65,71 @@ def _polygon(points: np.ndarray) -> QPolygonF:
     polygon.resize(count)
     ctypes.memmove(int(polygon.data()), array.ctypes.data, count * 16)
     return polygon
+
+
+def _gathered(runs) -> np.ndarray:
+    if isinstance(runs, np.ndarray):
+        return np.ascontiguousarray(runs, dtype=np.float64).reshape(-1, 2)
+    parts = [run for run in runs if len(run)]
+    if not parts:
+        return np.zeros((0, 2))
+    return np.concatenate(parts)
+
+
+def _inside(points: np.ndarray, left: float, right: float, top: float, bottom: float) -> np.ndarray:
+    if len(points) == 0:
+        return points
+    mask = ((points[:, 0] > left) & (points[:, 0] < right) &
+            (points[:, 1] > top) & (points[:, 1] < bottom))
+    got = points[mask]
+    if len(got) == 0:
+        return got.reshape(0, 2)
+    return got[np.lexsort((got[:, 1], got[:, 0]))]
+
+
+def _overlap_same(old: np.ndarray, new: np.ndarray, sx: float, sy: float, left: float,
+                  right: float, top: float, bottom: float) -> bool:
+    """The points a pan leaves on screen are the old ones, moved by the pan."""
+    shifted = old + (sx, sy) if len(old) else old
+    kept = _inside(shifted, left, right, top, bottom)
+    now = _inside(new, left, right, top, bottom)
+    if kept.shape != now.shape:
+        return False
+    if len(kept) == 0:
+        return True
+    return bool(np.allclose(kept, now, rtol=0.0, atol=1e-4))
+
+
+def _run_slices(run: np.ndarray, rects: List[QRectF]):
+    """The pieces of `run` that meet `rects`, each as its own polyline."""
+    count = len(run)
+    if count == 0:
+        return
+    need = np.zeros(count, dtype=bool)
+    xs = run[:, 0]
+    ys = run[:, 1]
+    for rect in rects:
+        need |= ((xs >= rect.left()) & (xs <= rect.right()) &
+                 (ys >= rect.top()) & (ys <= rect.bottom()))
+    if count > 1:
+        left = np.minimum(xs[:-1], xs[1:])
+        right = np.maximum(xs[:-1], xs[1:])
+        top = np.minimum(ys[:-1], ys[1:])
+        bottom = np.maximum(ys[:-1], ys[1:])
+        for rect in rects:
+            hit = ~((right < rect.left()) | (left > rect.right()) |
+                    (bottom < rect.top()) | (top > rect.bottom()))
+            need[:-1] |= hit
+            need[1:] |= hit
+    start = None
+    for index, on in enumerate(need):
+        if on and start is None:
+            start = index
+        elif not on and start is not None:
+            yield run[start:index]
+            start = None
+    if start is not None:
+        yield run[start:count]
 
 
 def _modifiers(keys) -> Modifiers:
@@ -115,6 +182,8 @@ class PlotWidget(QWidget):
         self._body: Optional[QImage] = None
         self._body_ratio = 0.0
         self._body_scene: Optional[Scene] = None
+        # How many pans copied the lines instead of stroking them again.
+        self.scrolls = 0
         self.figure.set_text_measure(self._text_width, self._text_height)
 
     def sizeHint(self) -> QSize:  # noqa: N802 -- Qt's name
@@ -174,24 +243,83 @@ class PlotWidget(QWidget):
         self.last_scene = scene
         painter = QPainter(self)
         try:
-            # The crosshair moves and the lines do not. Stroking them again on
-            # every move is what made the pane lag the pointer once a line was
-            # long, so the ground, the grid and the lines stay and are blitted.
-            if not self._body_matches(scene, ratio):
-                self._store_body(scene, ratio)
+            # The grid is a handful of marks. The lines are the stroke that
+            # lagged the pointer, so they are the image that is copied: a pan
+            # by whole device pixels slides that image and strokes only the
+            # strip that came into view. The crosshair never touches it.
+            self._paint_chrome(painter, scene)
+            if not self._scroll_lines(scene, ratio):
+                self._store_lines(scene, ratio)
             painter.drawImage(QPointF(0, 0), self._body)
             self._paint_over(painter, scene)
         finally:
             painter.end()
 
+    def _line_shift(self, scene: Scene, ratio: float) -> Optional[Tuple[int, int, float, float]]:
+        """The pan as whole device pixels, when the picture is that translation."""
+        kept = self._body_scene
+        if kept is None or self._body is None or self._body_ratio != ratio:
+            return None
+        if self.figure.settings["flipped"]:
+            return None
+        if (kept.width, kept.height, kept.area) != (scene.width, scene.height, scene.area):
+            return None
+        ox0, ox1, oy0, oy1 = kept.view
+        nx0, nx1, ny0, ny1 = scene.view
+        xspan = nx1 - nx0
+        yspan = ny1 - ny0
+        if not (xspan > 0.0 and yspan > 0.0):
+            return None
+        if abs((ox1 - ox0) - xspan) > 1e-9 * max(1.0, abs(xspan)):
+            return None
+        if abs((oy1 - oy0) - yspan) > 1e-9 * max(1.0, abs(yspan)):
+            return None
+        # A data span maps onto the pane. Gutters stay where they are, which
+        # is why the grid is painted every frame and only the lines are copied.
+        sx = (ox0 - nx0) / xspan * scene.area.width
+        sy = (ny0 - oy0) / yspan * scene.area.height
+        sxd = sx * ratio
+        syd = sy * ratio
+        rx, ry = round(sxd), round(syd)
+        if abs(sxd - rx) > 1e-3 or abs(syd - ry) > 1e-3:
+            return None
+        if abs(rx) >= self._body.width() or abs(ry) >= self._body.height():
+            return None
+        return int(rx), int(ry), sx, sy
+
+    def _lines_translated(self, scene: Scene, sx: float, sy: float) -> bool:
+        kept = self._body_scene
+        if kept is None or len(kept.lines) != len(scene.lines):
+            return False
+        # The pane, inset by the strip that entered. A column that slid off
+        # the pane is gone; one that stayed is the old column, one pixel over.
+        area = scene.area
+        left = area.x + max(sx, 0.0) + 0.25
+        right = area.x + area.width + min(sx, 0.0) - 0.25
+        top = area.y + max(sy, 0.0) + 0.25
+        bottom = area.y + area.height + min(sy, 0.0) - 0.25
+        if right - left < 1.0 or bottom - top < 1.0:
+            return False
+        for old, new in zip(kept.lines, scene.lines):
+            if (old.colour, old.width, old.marker_radius) != (
+                    new.colour, new.width, new.marker_radius):
+                return False
+            if not _overlap_same(_gathered(old.runs), _gathered(new.runs), sx, sy, left, right,
+                                 top, bottom):
+                return False
+            if not _overlap_same(_gathered(old.markers), _gathered(new.markers), sx, sy, left,
+                                 right, top, bottom):
+                return False
+        return True
+
     def _body_matches(self, scene: Scene, ratio: float) -> bool:
         kept = self._body_scene
         if kept is None or self._body is None or self._body_ratio != ratio:
             return False
-        if (kept.width, kept.height, kept.ground, kept.view, kept.area) != (
-                scene.width, scene.height, scene.ground, scene.view, scene.area):
+        if (kept.width, kept.height, kept.view, kept.area) != (
+                scene.width, scene.height, scene.view, scene.area):
             return False
-        if kept.under != scene.under or len(kept.lines) != len(scene.lines):
+        if len(kept.lines) != len(scene.lines):
             return False
         for old, new in zip(kept.lines, scene.lines):
             if (old.colour, old.width, old.marker_radius) != (
@@ -206,17 +334,83 @@ class PlotWidget(QWidget):
                     return False
         return True
 
-    def _store_body(self, scene: Scene, ratio: float) -> None:
+    def _scroll_lines(self, scene: Scene, ratio: float) -> bool:
+        shift = self._line_shift(scene, ratio)
+        if shift is None:
+            return False
+        sxd, syd, sx, sy = shift
+        if sxd == 0 and syd == 0:
+            return self._body_matches(scene, ratio)
+        if not self._lines_translated(scene, sx, sy):
+            return False
+        moved = QImage(self._body.width(), self._body.height(),
+                       QImage.Format.Format_ARGB32_Premultiplied)
+        moved.fill(Qt.GlobalColor.transparent)
+        source = self._body
+        source.setDevicePixelRatio(1.0)
+        area = scene.area
+        pane = QRectF(area.x * ratio, area.y * ratio, area.width * ratio, area.height * ratio)
+        seam = max(2, int(np.ceil(ratio)))
+        # The pane stays put. What was drawn in it moves by the pan, and the
+        # strip it uncovers is the only part stroked again.
+        device = []
+        if sxd > 0:
+            device.append(QRectF(pane.x(), pane.y(), sxd + seam, pane.height()))
+        elif sxd < 0:
+            device.append(QRectF(pane.right() + sxd - seam, pane.y(), -sxd + seam, pane.height()))
+        if syd > 0:
+            device.append(QRectF(pane.x(), pane.y(), pane.width(), syd + seam))
+        elif syd < 0:
+            device.append(QRectF(pane.x(), pane.bottom() + syd - seam, pane.width(), -syd + seam))
+        # Whole pixels strictly inside the pane. A shifted draw of the pane
+        # hangs a column into the gutter, over the axis, and a source
+        # rectangle that is a fraction off a pixel makes Qt scale the copy.
+        # Either one is a column a frame drawn again does not have. On a
+        # pane whose edge is not a multiple of the test's stride that column
+        # is the only difference, and it is the whole of it.
+        left = int(math.ceil(pane.left() - 1e-6))
+        top = int(math.ceil(pane.top() - 1e-6))
+        right = int(math.floor(pane.right() + 1e-6))
+        bottom = int(math.floor(pane.bottom() + 1e-6))
+        pane_px = QRect(left, top, max(0, right - left), max(0, bottom - top))
+        src = pane_px.adjusted(max(-sxd, 0), max(-syd, 0), -max(sxd, 0), -max(syd, 0))
+        dst = pane_px.adjusted(max(sxd, 0), max(syd, 0), -max(-sxd, 0), -max(-syd, 0))
+        if src.size() != dst.size() or src.width() <= 0 or src.height() <= 0:
+            return False
+        painter = QPainter(moved)
+        try:
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
+            painter.setClipRect(pane_px)
+            painter.drawImage(dst, source, src)
+            painter.setClipping(False)
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
+            for rect in device:
+                painter.fillRect(rect, Qt.GlobalColor.transparent)
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+            painter.scale(ratio, ratio)
+            logical = [QRectF(rect.x() / ratio, rect.y() / ratio, rect.width() / ratio,
+                              rect.height() / ratio) for rect in device]
+            self._paint_lines(painter, scene, ratio, logical)
+        finally:
+            painter.end()
+        moved.setDevicePixelRatio(ratio)
+        self._body = moved
+        self._body_ratio = ratio
+        self._body_scene = scene
+        self.scrolls += 1
+        return True
+
+    def _store_lines(self, scene: Scene, ratio: float) -> None:
         # The ratio is applied by the painter, not by the image. Setting it on
         # the image first makes Qt stroke an envelope for seconds; see
-        # _paint_body. It is set afterwards so the blit is still the right size.
+        # _paint_lines. It is set afterwards so the blit is still the right size.
         image = QImage(max(1, round(scene.width * ratio)), max(1, round(scene.height * ratio)),
                        QImage.Format.Format_ARGB32_Premultiplied)
         image.fill(Qt.GlobalColor.transparent)
         painter = QPainter(image)
         try:
             painter.scale(ratio, ratio)
-            self._paint_body(painter, scene, ratio)
+            self._paint_lines(painter, scene, ratio)
         finally:
             painter.end()
         image.setDevicePixelRatio(ratio)
@@ -308,8 +502,8 @@ class PlotWidget(QWidget):
             painter.drawEllipse(QPointF(mark.x0, mark.y0), mark.radius, mark.radius)
         painter.restore()
 
-    def _paint_body(self, painter: QPainter, scene: Scene, ratio: float = 1.0) -> None:
-        """The ground, the grid and the lines: what does not move with the pointer."""
+    def _paint_chrome(self, painter: QPainter, scene: Scene) -> None:
+        """The ground and the grid. A pan redraws them; they are not the line."""
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         if scene.ground[3] > 0.0:
             painter.fillRect(QRectF(0, 0, scene.width, scene.height), _qcolor(scene.ground))
@@ -317,8 +511,17 @@ class PlotWidget(QWidget):
         for mark in scene.under:
             self._paint_mark(painter, mark, area)
 
+    def _paint_lines(self, painter: QPainter, scene: Scene, ratio: float = 1.0,
+                     strips: Optional[List[QRectF]] = None) -> None:
+        """The lines. `strips` is the part of the pane a pan has to stroke."""
+        area = QRectF(scene.area.x, scene.area.y, scene.area.width, scene.area.height)
         painter.save()
         painter.setClipRect(area)
+        if strips:
+            region = QRegion()
+            for rect in strips:
+                region = region.united(QRegion(rect.toAlignedRect()))
+            painter.setClipRegion(region, Qt.ClipOperation.IntersectClip)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         for line in scene.lines:
             pen = QPen(_qcolor(line.colour), line.width)
@@ -326,15 +529,23 @@ class PlotWidget(QWidget):
             pen.setCapStyle(Qt.PenCapStyle.RoundCap)
             painter.setPen(pen)
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            for run in line.runs:
+            runs = line.runs
+            if strips:
+                sliced = []
+                for run in runs:
+                    sliced.extend(_run_slices(run, strips))
+                runs = sliced
+            for run in runs:
                 if len(run) == 1:
-                    painter.drawPoint(QPointF(run[0, 0], run[0, 1]))
+                    painter.drawPoint(QPointF(float(run[0, 0]), float(run[0, 1])))
                     continue
                 # Qt's stroker takes seconds on an envelope once a device pixel
                 # ratio turns the hairline into a wider pen, or the ratio is a
                 # transform on the stroke. One device pixel, with the ratio
                 # already in the coordinates, is the same line and stays quick.
-                if _envelope(run) and (ratio != 1.0 or line.width != 1.0):
+                # A strip is a few columns, and the hairline path would drop
+                # the clip that keeps it off the part just copied.
+                if not strips and _envelope(run) and (ratio != 1.0 or line.width != 1.0):
                     painter.save()
                     painter.resetTransform()
                     painter.setClipRect(QRectF(area.x() * ratio, area.y() * ratio,
@@ -352,9 +563,18 @@ class PlotWidget(QWidget):
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.setBrush(_qcolor(line.colour))
                 for x, y in line.markers:
-                    painter.drawEllipse(QPointF(x, y), line.marker_radius, line.marker_radius)
+                    if strips and not any(rect.contains(QPointF(float(x), float(y)))
+                                           for rect in strips):
+                        continue
+                    painter.drawEllipse(QPointF(float(x), float(y)), line.marker_radius,
+                                        line.marker_radius)
                 painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.restore()
+
+    def _paint_body(self, painter: QPainter, scene: Scene, ratio: float = 1.0) -> None:
+        """The ground, the grid and the lines: what does not move with the pointer."""
+        self._paint_chrome(painter, scene)
+        self._paint_lines(painter, scene, ratio)
 
     def _paint_over(self, painter: QPainter, scene: Scene) -> None:
         area = QRectF(scene.area.x, scene.area.y, scene.area.width, scene.area.height)

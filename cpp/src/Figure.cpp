@@ -56,6 +56,36 @@ constexpr double kInfinity = std::numeric_limits<double>::infinity();
 // Along x, which on a flipped pane is up it: the frame's height, less the
 // title's line, which is as independent of what the plot draws as the
 // width's gutter is.
+// How far the pointer has moved, in whole device columns of one pane axis.
+//
+// A column is one device pixel, the same count projectLine draws: the window
+// span over llround(extent * pixelRatio). The grid is anchored at zero, so a
+// window that moves by a whole number of those columns keeps every sample
+// that stays on screen in the column it was in, one pixel over. A fraction
+// of a column slides the edges across samples. The region a blit would copy
+// is then no longer the picture that was drawn, and the copy is either
+// refused or a lie. The fraction stays in `pending`, in logical pixels, until
+// the pointer has crossed a column. A wheel and a window stated in values do
+// not come through here: both of those change the column width, or name a
+// place, and neither is a translation of the picture.
+double wholeColumns(double& pending, double delta, double extent, double pixelRatio)
+{
+    if (!(extent > 0.0) || !std::isfinite(delta)) {
+        return 0.0;
+    }
+    const double ratio = std::max(pixelRatio, 1.0);
+    const double columns = static_cast<double>(
+        std::max<std::int64_t>(std::int64_t{1}, std::llround(extent * ratio)));
+    pending += delta;
+    const double whole = std::trunc(pending * columns / extent);
+    if (whole == 0.0) {
+        return 0.0;
+    }
+    const double used = whole * extent / columns;
+    pending -= used;
+    return used;
+}
+
 int columnsOf(double pixels)
 {
     const int columns = static_cast<int>(std::max(pixels, 0.0));
@@ -869,8 +899,12 @@ Scene Figure::compose(const SceneRequest& request)
         std::vector<Point> points;
         std::vector<PlotRun> runs;
         const PlotView view = lineView(line, upright);
-        const PlotProjected result =
-            projectLine(line, axis, view, points, runs, &columnScratch_);
+        if (columnKept_.size() < static_cast<std::size_t>(count)) {
+            columnKept_.resize(static_cast<std::size_t>(count));
+        }
+        ColumnScratch& kept = columnKept_[static_cast<std::size_t>(k)];
+        kept.retain = true;
+        const PlotProjected result = projectLine(line, axis, view, points, runs, &kept);
         // The way back to the values, through the view that projected them,
         // before the points are turned onto a flipped pane.
         const double xFrom = axisPosition(view.xMin, view.xLog, view.xLogBase);
@@ -2031,6 +2065,8 @@ void Figure::press(double px, double py, Button button, Modifiers modifiers)
         return;
     }
     controlClick_ = modifiers.control && settings_.lineGestures;
+    panGrainX_ = 0.0;
+    panGrainY_ = 0.0;
     drag_ = Drag::Pan;
 }
 
@@ -2051,7 +2087,14 @@ void Figure::move(double px, double py, Modifiers modifiers)
         banding_ || (drag_ == Drag::Band && (std::abs(px - pressed_.x()) > style_.dragDistance ||
                                              std::abs(py - pressed_.y()) > style_.dragDistance));
     if (drag_ == Drag::Pan) {
-        camera_.panBy(dx, dy);
+        // Whole device columns only. The fraction of a column still on the
+        // pointer is kept for the next move, so a slow drag steps a pixel at
+        // a time and the picture that stays is the one already drawn.
+        const double stepX = wholeColumns(panGrainX_, dx, camera_.area.width, pixelRatio_);
+        const double stepY = wholeColumns(panGrainY_, dy, camera_.area.height, pixelRatio_);
+        if (stepX != 0.0 || stepY != 0.0) {
+            camera_.panBy(stepX, stepY);
+        }
         // A drag has nowhere it is heading (PlotSurface.panBy).
         source().clearFocus();
     }

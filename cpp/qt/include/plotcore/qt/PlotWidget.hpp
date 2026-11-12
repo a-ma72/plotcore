@@ -21,9 +21,11 @@
 
 #include <QFont>
 #include <QImage>
+#include <QRectF>
 #include <QWidget>
 
 #include <array>
+#include <vector>
 
 class QPainter;
 
@@ -85,9 +87,27 @@ private:
     void followModifiers();
     void drawText(QPainter& painter, const TextItem& text) const;
     void paintMark(QPainter& painter, const Mark& mark, const QRectF& area) const;
+    void paintChrome(QPainter& painter, const Scene& scene) const;
+    /// The lines. `strips` is the part a pan still has to stroke; null strokes
+    /// every run.
+    void paintLines(QPainter& painter, const Scene& scene,
+                    const std::vector<QRectF>* strips = nullptr) const;
+    /// Slide the stored lines by a whole-pixel pan and stroke the new strip.
+    /// False when the picture is not that translation, so the caller paints
+    /// the lines again.
+    bool scrollLines(const Scene& scene);
+    void storeLines(const Scene& scene);
+    [[nodiscard]] bool linesMatch(const Scene& scene) const;
+    [[nodiscard]] bool linesTranslated(const Scene& scene, double sx, double sy) const;
 
     Figure figure_;
     Scene scene_;
+    /// The stroked lines of the last frame, in device pixels. A pan copies
+    /// this and paints only the strip that entered.
+    QImage lines_;
+    Scene linesScene_;
+    double linesRatio_ = 0.0;
+    bool linesHeld_ = false;
     std::array<QFont, 6> fonts_;
     std::array<bool, 6> fontSet_{};
     /// showEvent focuses once. A later show leaves the keyboard where the

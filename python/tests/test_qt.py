@@ -74,6 +74,50 @@ def test_the_widget_hands_the_figure_its_wheel_and_its_drag(qapp):
     widget.close()
 
 
+def test_a_whole_pixel_pan_copies_the_lines_it_already_drew(qapp):
+    widget = PlotWidget()
+    widget.figure.add_line(np.sin(np.arange(20_000) * 0.02), "wave")
+    widget.figure.settings["legend"] = False
+    # A picture asks for no crosshair. A pointer the platform delivers while
+    # the widget is shown would otherwise be the only pixels that differ.
+    widget.figure.settings["cursor"] = False
+    widget.resize(480, 320)
+    widget.show()
+    widget.repaint()
+    QApplication.processEvents()
+    scene = widget.last_scene
+    ratio = widget.devicePixelRatioF()
+    columns = max(1, round(scene.area.width * ratio))
+    x0, x1, y0, y1 = widget.figure.view
+    step = (x1 - x0) / columns
+    before = widget.grab().toImage()
+    widget.figure.set_view(x0 + step, x1 + step, y0, y1)
+    widget.repaint()
+    QApplication.processEvents()
+    after = widget.grab().toImage()
+    shift = step / (x1 - x0) * scene.area.width * ratio
+    if abs(shift - round(shift)) < 1e-3:
+        assert widget.scrolls >= 1
+        rx = int(round(shift))
+        # The window moved right, so a pixel that stayed is the one that was
+        # rx device pixels to its right.
+        x = after.width() // 2
+        y = after.height() // 2
+        assert after.pixel(x, y) == before.pixel(x + rx, y)
+    # The same widget, the lines stroked again instead of copied. grab() and
+    # render() are different paint devices: on Linux the glyphs in the gutter
+    # are not the same pixels, and that difference is not the copy.
+    widget._body = None
+    widget.repaint()
+    QApplication.processEvents()
+    drawn = widget.grab().toImage()
+    assert after.size() == drawn.size()
+    mismatch = [(x, y) for x in range(after.width()) for y in range(after.height())
+                if after.pixel(x, y) != drawn.pixel(x, y)]
+    assert not mismatch, (len(mismatch), mismatch[0], mismatch[-1])
+    widget.close()
+
+
 def test_the_example_walks_every_feature(qapp, tmp_path):
     pytest.importorskip("matplotlib")
     spec = importlib.util.spec_from_file_location("plotcore_pyqt6_demo", EXAMPLE)
