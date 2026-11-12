@@ -881,6 +881,51 @@ TEST_CASE("an envelope names the element each extreme is, and holds nothing else
     }
 }
 
+TEST_CASE("a column's extremes leave out the sample after it", "[levels][pyramid]")
+{
+    // extremesOver takes the stroke out of the run. A column does not own that
+    // sample, and when the sample is the extreme it would lengthen the column
+    // with a value the next one holds.
+    const std::vector<double> spike{1.0, 2.0, 3.0, 100.0};
+    const plotcore::LinePyramid spikePyramid =
+        plotcore::pyramidOf(spike.data(), static_cast<long long>(spike.size()), 1);
+    const plotcore::Extremes inside = plotcore::extremesInside(spikePyramid, 0, 3);
+    const plotcore::Extremes seamed = plotcore::extremesOver(spikePyramid, 0, 3);
+    REQUIRE(inside.found());
+    CHECK(inside.lowest == 1.0);
+    CHECK(inside.highest == 3.0);
+    CHECK(inside.lowAt == 0);
+    CHECK(inside.highAt == 2);
+    CHECK(seamed.highest == 100.0);
+
+    const std::vector<double> line = testLine(100000);
+    const auto length = static_cast<long long>(line.size());
+    const plotcore::LinePyramid pyramid = plotcore::pyramidOf(line.data(), length, 1);
+    for (long long from = 0; from < length; from += 997) {
+        for (const long long width : {1LL, 3LL, 70LL, 1500LL, 9000LL}) {
+            const long long to = std::min(from + width, length);
+            long long reads = 0;
+            const plotcore::Extremes got = plotcore::extremesInside(pyramid, from, to, &reads);
+            const plotcore::Extremes want = plotcore::extremesOf(line.data(), from, to);
+            INFO("run " << from << ".." << to);
+            REQUIRE(got.found() == want.found());
+            if (!want.found()) {
+                continue;
+            }
+            CHECK(got.lowest == want.lowest);
+            CHECK(got.highest == want.highest);
+            CHECK(got.lowAt == want.lowAt);
+            CHECK(got.highAt == want.highAt);
+            // The run is answered from the levels. A wide one reads a handful
+            // of base elements, not the samples it covers.
+            if (to - from > 64) {
+                CHECK(reads < to - from);
+                CHECK(reads <= 64);
+            }
+        }
+    }
+}
+
 TEST_CASE("a run drawn sample for sample names no positions", "[levels][pyramid][positions]")
 {
     // The values are the elements and the step already says where each sits.

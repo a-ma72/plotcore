@@ -16,6 +16,7 @@
 
 #include "plotcore/Levels.hpp"
 #include "plotcore/Projection.hpp"
+#include "plotcore/Pyramid.hpp"
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -2222,6 +2223,140 @@ TEST_CASE("a line reaches the last time of its time base", "[plot][positions]")
     plotcore::PlotLine longer = line;
     longer.positionStart = 5.0;
     CHECK(std::isnan(plotcore::xOf(longer, axis, 999)));
+}
+
+/// The same points and the same runs, which is the picture.
+void samePicture(const Projected& got, const Projected& want)
+{
+    REQUIRE(got.points.size() == want.points.size());
+    REQUIRE(got.runs.size() == want.runs.size());
+    for (std::size_t i = 0; i < want.points.size(); ++i) {
+        CHECK(got.points[i].x() == want.points[i].x());
+        CHECK(got.points[i].y() == want.points[i].y());
+    }
+    for (std::size_t i = 0; i < want.runs.size(); ++i) {
+        CHECK(got.runs[i].first == want.runs[i].first);
+        CHECK(got.runs[i].count == want.runs[i].count);
+    }
+}
+
+TEST_CASE("a wide view reads a column from the pyramid", "[plot]")
+{
+    // The samples are the base. A column's extremes are a fold of the levels
+    // above it, so the fill reads a handful of base elements per column and
+    // not the samples the column holds. The picture is the one that fill
+    // draws when it does walk them.
+    constexpr int count = 200000;
+    std::vector<double> values(count);
+    for (int i = 0; i < count; ++i) {
+        values[i] = std::sin(static_cast<double>(i) * 0.01) + ((i % 250) == 0 ? 4.0 : 0.0);
+    }
+    const plotcore::LinePyramid pyramid =
+        plotcore::pyramidOf(values.data(), count, 1);
+    plotcore::PlotLine fast;
+    fast.values = pyramid.levels.front().values.data();
+    fast.count = count;
+    fast.pyramid = &pyramid;
+    plotcore::PlotLine walked = fast;
+    walked.pyramid = nullptr;
+
+    const plotcore::PlotView view = paneOver(0.0, static_cast<double>(count - 1), -2.0, 6.0);
+    plotcore::ColumnScratch scratch;
+    scratch.retain = true;
+    Projected fromLevels;
+    plotcore::projectLine(fast, plotcore::PlotAxis{}, view, fromLevels.points, fromLevels.runs,
+                          &scratch);
+    const Projected fromSamples = project(walked, plotcore::PlotAxis{}, view);
+    samePicture(fromLevels, fromSamples);
+    CHECK(scratch.scanned == 1000);
+    CHECK(scratch.samplesRead < 1000 * 64);
+    CHECK(scratch.samplesRead < count / 4);
+
+    // One column further, the columns that stay are the ones already filled.
+    const double column = (view.xMax - view.xMin) / 1000.0;
+    const plotcore::PlotView panned =
+        paneOver(view.xMin + column, view.xMax + column, view.yMin, view.yMax);
+    Projected slid;
+    plotcore::projectLine(fast, plotcore::PlotAxis{}, panned, slid.points, slid.runs, &scratch);
+    CHECK(scratch.scanned == 1);
+    CHECK(scratch.samplesRead < 64);
+    samePicture(slid, project(walked, plotcore::PlotAxis{}, panned));
+}
+
+TEST_CASE("a column with one finite sample is not drawn as a vertical", "[plot]")
+{
+    // The column holds one finite sample and a run of gaps. Its extremes are
+    // that one value, so the count is what keeps it a chord: reported as more
+    // than one sample, and lengthened by the chord at its edge, it would be
+    // the vertical a crowded column is.
+    constexpr int count = 10000;
+    std::vector<double> values(count);
+    for (int i = 0; i < count; ++i) {
+        values[i] = std::sin(static_cast<double>(i) / 30.0);
+    }
+    for (int i = 5000; i < 5100; ++i) {
+        values[i] = kNaN;
+    }
+    values[5000] = 10.0;
+    values[4999] = 0.0;
+
+    const plotcore::LinePyramid pyramid =
+        plotcore::pyramidOf(values.data(), count, 1);
+    plotcore::PlotLine fast;
+    fast.values = pyramid.levels.front().values.data();
+    fast.count = count;
+    fast.pyramid = &pyramid;
+    plotcore::PlotLine walked = fast;
+    walked.pyramid = nullptr;
+
+    const plotcore::PlotView view = paneOver(0.0, static_cast<double>(count - 1), -1.0, 11.0);
+    const Projected fromLevels = project(fast, plotcore::PlotAxis{}, view);
+    const Projected fromSamples = project(walked, plotcore::PlotAxis{}, view);
+    samePicture(fromLevels, fromSamples);
+
+    // The gap is samples [5000, 5100), one of them finite. A vertical there
+    // would be that sample drawn as a crowded column.
+    for (const plotcore::PlotRun& run : fromLevels.runs) {
+        if (run.count != 2) {
+            continue;
+        }
+        const plotcore::Point& a = fromLevels.points[static_cast<std::size_t>(run.first)];
+        const plotcore::Point& b = fromLevels.points[static_cast<std::size_t>(run.first + 1)];
+        if (a.x() != b.x() || a.y() == b.y()) {
+            continue;
+        }
+        const double dataX = view.xMin + a.x() / view.width * (view.xMax - view.xMin);
+        CHECK((dataX < 5000.0 || dataX >= 5100.0));
+    }
+}
+
+TEST_CASE("a logarithmic y still reads the samples a column holds", "[plot]")
+{
+    // The levels keep every finite extreme, and a logarithmic y does not draw
+    // a sample at or below zero. Folding the column from those levels would
+    // count the negatives in.
+    constexpr int count = 4000;
+    std::vector<double> values(count);
+    for (int i = 0; i < count; ++i) {
+        values[i] = std::sin(static_cast<double>(i) / 20.0);
+    }
+    const plotcore::LinePyramid pyramid =
+        plotcore::pyramidOf(values.data(), count, 1);
+    plotcore::PlotLine fast;
+    fast.values = pyramid.levels.front().values.data();
+    fast.count = count;
+    fast.pyramid = &pyramid;
+    plotcore::PlotLine walked = fast;
+    walked.pyramid = nullptr;
+
+    plotcore::PlotView view = paneOver(0.0, static_cast<double>(count - 1), 0.1, 2.0);
+    view.yLog = true;
+    plotcore::ColumnScratch scratch;
+    Projected fromLevels;
+    plotcore::projectLine(fast, plotcore::PlotAxis{}, view, fromLevels.points, fromLevels.runs,
+                          &scratch);
+    samePicture(fromLevels, project(walked, plotcore::PlotAxis{}, view));
+    CHECK(scratch.samplesRead > count / 2);
 }
 
 TEST_CASE("a pan by whole columns reuses the columns it already filled", "[plot]")

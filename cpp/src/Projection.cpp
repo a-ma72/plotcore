@@ -4,6 +4,8 @@
 
 #include "plotcore/Projection.hpp"
 
+#include "plotcore/Pyramid.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -789,6 +791,27 @@ PlotProjected projectLine(const PlotLine& line, const PlotAxis& axis, const Plot
                 fillTo = columns;
             }
             int most = 0;
+            int samplesRead = 0;
+            // The base of the pyramid these values are, when a column can be
+            // answered from the levels above it. A logarithmic y draws only
+            // the positive samples, which those levels do not separate from
+            // the rest, so that axis still reads the column.
+            const bool foldedColumns =
+                !yMap.logarithmic && line.pyramid != nullptr && line.pyramid->baseBucket() == 1 &&
+                !line.pyramid->levels.empty() &&
+                line.values == line.pyramid->levels.front().values.data();
+            const auto readSamples = [&](ColumnScratch::Column& slot, std::int64_t start,
+                                         std::int64_t end) {
+                for (std::int64_t i = start; i < end; ++i) {
+                    const double value = line.values[i];
+                    if (!yMap.draws(value)) {
+                        continue;
+                    }
+                    include(slot.low, slot.high, value);
+                    ++slot.count;
+                }
+                samplesRead += static_cast<int>(end - start);
+            };
             for (std::int64_t column = fillFrom; column < fillTo; ++column) {
                 const double leftEdge = edges[static_cast<std::size_t>(column)];
                 const double rightEdge = edges[static_cast<std::size_t>(column + 1)];
@@ -817,13 +840,25 @@ PlotProjected projectLine(const PlotLine& line, const PlotAxis& axis, const Plot
                     end = start;
                 }
                 ColumnScratch::Column& slot = columnsBuf.columns[static_cast<std::size_t>(column)];
-                for (std::int64_t i = start; i < end; ++i) {
-                    const double value = line.values[i];
-                    if (!yMap.draws(value)) {
-                        continue;
+                // Two different extremes are already more than one sample,
+                // which is all a vertical asks. A column whose finite samples
+                // are one value still needs its count: one sample is a chord,
+                // and the pyramid does not store how many there were. The same
+                // for a gap, which has no extreme at all.
+                bool folded = false;
+                if (foldedColumns && end > start) {
+                    long long baseReads = 0;
+                    const Extremes found = extremesInside(*line.pyramid, start, end, &baseReads);
+                    if (found.found() && found.lowest != found.highest) {
+                        slot.low = found.lowest;
+                        slot.high = found.highest;
+                        slot.count = 2;
+                        samplesRead += static_cast<int>(baseReads);
+                        folded = true;
                     }
-                    include(slot.low, slot.high, value);
-                    ++slot.count;
+                }
+                if (!folded) {
+                    readSamples(slot, start, end);
                 }
                 if (const std::optional<double> y = chordAt(leftEdge)) {
                     include(slot.low, slot.high, *y);
@@ -836,6 +871,7 @@ PlotProjected projectLine(const PlotLine& line, const PlotAxis& axis, const Plot
                 most = std::max(most, columnsBuf.columns[static_cast<std::size_t>(column)].count);
             }
             columnsBuf.scanned = static_cast<int>(fillTo - fillFrom);
+            columnsBuf.samplesRead = samplesRead;
             if (columnsBuf.retain && !line.summarised) {
                 ColumnScratch::Kept& next = columnsBuf.kept;
                 next.valid = true;

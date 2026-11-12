@@ -72,6 +72,8 @@
 
 namespace plotcore {
 
+struct LinePyramid;
+
 /// One line to draw.
 ///
 /// `values` is **borrowed**: the renderer reads it on every frame and never
@@ -210,6 +212,13 @@ struct PlotLine
     /// ordered its time base once, and a pyramid's positions only ever run
     /// forward. Unset means "look" -- what a hand-built line in a test does.
     std::optional<bool> xOrdered;
+
+    /// The pyramid `values` is the base of, when the owner holds one.
+    ///
+    /// A column then takes its extremes from the levels above the base instead
+    /// of from the samples. Null, or a base coarser than the samples, and the
+    /// column reads what it was given. Borrowed for the call, as `values` is.
+    const LinePyramid* pyramid = nullptr;
 };
 
 /// Working memory for `projectLine`'s device-pixel columns.
@@ -240,6 +249,14 @@ struct ColumnScratch
     /// How many columns the last `projectLine` walked. The ones a pan slid
     /// across are not in this count.
     int scanned = 0;
+
+    /// How many base samples that walk read.
+    ///
+    /// A column answered from a coarser level of the pyramid counts the
+    /// elements that level did not cover, not the samples inside it. The two
+    /// a chord reads at an edge are not in this count: an edge is two samples
+    /// whatever the level says. The columns a pan slid are not either.
+    int samplesRead = 0;
 
     /// Slide columns across calls. Off unless the owner keeps this scratch
     /// for one line: the shared thread-local one is used by callers that

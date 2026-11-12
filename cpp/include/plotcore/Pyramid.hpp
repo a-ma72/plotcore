@@ -284,6 +284,22 @@ private:
 /// positions of whichever level held each one.
 [[nodiscard]] Extremes extremesOver(const LinePyramid& pyramid, long long first, long long last);
 
+/// The extremes of elements `[first, last)`, and not of the sample after them.
+///
+/// `extremesOver` takes element `last` into the run when it and the one before
+/// it are finite: that is the stroke out of the run, and a fold cannot leave
+/// it out. A device-pixel column owns `[start, end)` and the next sample
+/// belongs to the next column, so that stroke would lengthen this column with
+/// a sample it does not hold. A pair whose seam falls at `last` is opened
+/// instead of taken, because the seam may be the extreme; the buckets that
+/// end inside the run are taken whole. The answer is what `extremesOf` reports
+/// over the same elements.
+///
+/// `baseReads`, when set, counts elements read from a base of one. A pair
+/// above that base is not one of them: it is the fold the base was kept for.
+[[nodiscard]] Extremes extremesInside(const LinePyramid& pyramid, long long first, long long last,
+                                      long long* baseReads = nullptr);
+
 /// The smallest value above zero anywhere in the line, into `out`; false when
 /// there is none.
 ///

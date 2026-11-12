@@ -629,6 +629,106 @@ Extremes extremesOver(const LinePyramid& pyramid, long long first, long long las
     return found;
 }
 
+Extremes extremesInside(const LinePyramid& pyramid, long long first, long long last,
+                        long long* baseReads)
+{
+    Extremes found;
+    if (pyramid.empty()) {
+        return found;
+    }
+    const long long length = pyramid.length;
+    first = std::max<long long>(first, 0);
+    last = std::min(last, length);
+    if (last <= first) {
+        return found;
+    }
+
+    // Which bucket each winner was copied out of. The same record extremesOver
+    // keeps, and resolved the same way: a pair's position is the element the
+    // fold stored, and a base element is its own index.
+    struct Slot
+    {
+        std::size_t level = 0;
+        long long bucket = -1;
+        int slot = 0;
+    };
+    Slot lowSlot;
+    Slot highSlot;
+    const auto take = [&](double value, long long at, const Slot& from) {
+        if (!std::isfinite(value)) {
+            return;
+        }
+        if (found.lowAt < 0 || value < found.lowest) {
+            found.lowest = value;
+            found.lowAt = at;
+            lowSlot = from;
+        }
+        if (found.highAt < 0 || value > found.highest) {
+            found.highest = value;
+            found.highAt = at;
+            highSlot = from;
+        }
+    };
+
+    long long at = first;
+    while (at < last) {
+        // The coarsest level whose own elements lie inside the run and whose
+        // seam, where a pair has one, does too. A pair that ends on `last`
+        // stores element `last`, which this run does not own. The base always
+        // qualifies when the run still has an element: its value is that
+        // element, and the seam is not in it.
+        int use = -1;
+        for (std::size_t i = 0; i < pyramid.levels.size(); ++i) {
+            const long long bucket = pyramid.levels[i].bucket;
+            if (bucket <= 0 || at % bucket != 0) {
+                break;
+            }
+            const long long coveredEnd = at + bucket;
+            if (std::min(coveredEnd, length) > last) {
+                break;
+            }
+            if (bucket > 1 && coveredEnd < length && coveredEnd >= last) {
+                break;
+            }
+            use = static_cast<int>(i);
+        }
+        if (use < 0) {
+            break;
+        }
+        const PyramidLevel& level = pyramid.levels[static_cast<std::size_t>(use)];
+        const long long index = at / level.bucket;
+        if (level.bucket == 1) {
+            if (index < static_cast<long long>(level.values.size())) {
+                take(level.values[static_cast<std::size_t>(index)], at, Slot{});
+            }
+            if (baseReads != nullptr) {
+                ++*baseReads;
+            }
+        }
+        else if (index < level.buckets()) {
+            take(level.values[static_cast<std::size_t>(index) * 2], at,
+                 Slot{static_cast<std::size_t>(use), index, 0});
+            take(level.values[static_cast<std::size_t>(index) * 2 + 1], at + level.bucket / 2,
+                 Slot{static_cast<std::size_t>(use), index, 1});
+        }
+        const long long step = std::min(level.bucket, length - at);
+        at += std::max<long long>(step, 1);
+    }
+
+    const auto element = [&](const Slot& held) {
+        const PyramidLevel& level = pyramid.levels[held.level];
+        return static_cast<long long>(level.at[static_cast<std::size_t>(held.bucket) * 2 +
+                                               static_cast<std::size_t>(held.slot)]);
+    };
+    if (lowSlot.bucket >= 0) {
+        found.lowAt = element(lowSlot);
+    }
+    if (highSlot.bucket >= 0) {
+        found.highAt = element(highSlot);
+    }
+    return found;
+}
+
 void foldColumns(const LinePyramid& pyramid, std::span<const double> edges, ColumnFold& out)
 {
     out.values.clear();

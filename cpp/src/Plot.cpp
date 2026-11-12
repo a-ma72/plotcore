@@ -618,10 +618,13 @@ PlotLine Plot::drawLine(int line) const
         // The samples, one per element, at step 1. projectLine lays the
         // columns on them. A power-of-two window of the same line is about
         // two points a column, and drawn as samples that is a different
-        // picture from the one the columns make.
+        // picture from the one the columns make. The pyramid goes with them
+        // so a column's extremes are a fold of it: the samples stay here,
+        // because a chord at an edge is the two of them the edge falls between.
         const PyramidLevel& base = held.pyramid.levels.front();
         drawn.values = base.values.data();
         drawn.count = static_cast<long long>(base.values.size());
+        drawn.pyramid = &held.pyramid;
         drawn.summarised = false;
         return drawn;
     }
